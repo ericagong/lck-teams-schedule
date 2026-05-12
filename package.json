@@ -1,0 +1,24 @@
+{
+  "name": "lck-schedule-sync",
+  "version": "0.1.0",
+  "description": "T1 팬을 위한 LCK 일정 자동 동기화 .ics 피드 — 한 경기도 놓치지 않게",
+  "type": "module",
+  "private": true,
+  "packageManager": "pnpm@9.15.9",
+  "scripts": {
+    "dev": "tsx src/main.ts",
+    "build": "tsc --noEmit && tsx src/main.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.0",
+    "vitest": "^1.2.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

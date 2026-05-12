@@ -1,0 +1,44 @@
+/**
+ * 진입점.
+ *
+ * side effect 모음:
+ * 1) lolesports API fetch (LCK)
+ * 2) T1 ICS 생성
+ * 3) public/t1.ics에 쓰기
+ *
+ * GitHub Actions에서 `pnpm dev` 또는 `tsx src/main.ts`로 실행.
+ */
+
+import { mkdir, writeFile } from 'node:fs/promises';
+import { dirname, resolve } from 'node:path';
+
+import { fetchSchedule, LEAGUE_IDS } from './lolesports.js';
+import { buildIcsForTeam } from './pipeline.js';
+
+const OUTPUT_PATH = resolve(process.cwd(), 'public', 't1.ics');
+const TEAM_CODE = 'T1';
+
+async function main(): Promise<void> {
+  console.log(`[lck-schedule-sync] Fetching LCK schedule...`);
+  const allMatches = await fetchSchedule(LEAGUE_IDS.LCK);
+  console.log(`[lck-schedule-sync] Fetched ${allMatches.length} LCK matches.`);
+
+  const ics = buildIcsForTeam({
+    matches: allMatches,
+    teamCode: TEAM_CODE,
+    icsOptions: { calendarName: 'T1 LCK 일정' },
+  });
+
+  await mkdir(dirname(OUTPUT_PATH), { recursive: true });
+  await writeFile(OUTPUT_PATH, ics, 'utf-8');
+
+  const matchCount = ics.split('BEGIN:VEVENT').length - 1;
+  console.log(
+    `[lck-schedule-sync] Wrote ${matchCount} ${TEAM_CODE} matches → ${OUTPUT_PATH}`,
+  );
+}
+
+main().catch((err) => {
+  console.error('[lck-schedule-sync] FATAL:', err);
+  process.exit(1);
+});

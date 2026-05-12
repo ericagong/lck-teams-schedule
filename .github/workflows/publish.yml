@@ -1,0 +1,58 @@
+name: Publish ICS
+
+on:
+  workflow_dispatch: # 수동 실행
+  schedule:
+    # 매일 2회 — 시간은 cron이 UTC 기준이므로 KST에서 빼야 함
+    - cron: '0 19 * * *' # KST 새벽 04:00 (UTC 19:00 전날)
+    - cron: '0 14 * * *' # KST 저녁 23:00 (UTC 14:00)
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run tests
+        run: pnpm test
+
+      - name: Generate t1.ics
+        run: pnpm dev
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: public
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
