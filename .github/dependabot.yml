@@ -11,8 +11,15 @@ updates:
     groups:
       dev-deps:
         dependency-type: development
+        update-types:
+          - minor
+          - patch
       production:
         dependency-type: production
+        update-types:
+          - minor
+          - patch
+    # 메이저 업데이트는 그룹에서 제외 → 의존성별 개별 PR로 자동 생성
     commit-message:
       prefix: chore
       include: scope
