@@ -96,9 +96,7 @@ function buildVTimezoneBlock(): string[] {
 
 function buildVEventBlock(match: Match, now: Date): string[] {
   const startUtc = new Date(match.startsAt);
-  const estimatedDurationMs =
-    ESTIMATED_HOURS_BY_BEST_OF[match.bestOf] * 60 * 60 * 1000;
-  const endUtc = new Date(startUtc.getTime() + estimatedDurationMs);
+  const endUtc = estimateMatchEnd(startUtc, match.bestOf);
 
   const summary = buildSummary(match);
   const description = buildDescription(match);
@@ -142,6 +140,16 @@ function buildDescription(match: Match): string {
  * ============================================================ */
 
 /**
+ * 매치 시작 시각과 Bo 카운트로 예상 종료 시각 계산.
+ *
+ * API가 종료 시각을 주지 않으므로 ESTIMATED_HOURS_BY_BEST_OF 평균값으로 추정.
+ */
+function estimateMatchEnd(startUtc: Date, bestOf: 1 | 3 | 5): Date {
+  const durationMs = ESTIMATED_HOURS_BY_BEST_OF[bestOf] * 60 * 60 * 1000;
+  return new Date(startUtc.getTime() + durationMs);
+}
+
+/**
  * UTC Date → YYYYMMDDTHHMMSSZ (Zulu time).
  * 예: 2026-05-12T03:45:00Z → 20260512T034500Z
  */
@@ -153,19 +161,32 @@ function formatUtcCompact(date: Date): string {
 
 /**
  * Date → KST 기준 YYYYMMDDTHHMMSS (Z 없음, TZID 명시 시 사용).
- *
- * UTC 시각에 +9h 더한 후 포맷팅. Asia/Seoul은 DST 없으므로 +9 고정.
  */
 function formatKstCompact(utcDate: Date): string {
-  const kst = new Date(utcDate.getTime() + 9 * 60 * 60 * 1000);
-  // Date의 UTC 메서드로 읽으면 KST 값을 얻을 수 있음 (시프트했으므로)
-  const yyyy = kst.getUTCFullYear();
-  const mm = String(kst.getUTCMonth() + 1).padStart(2, '0');
-  const dd = String(kst.getUTCDate()).padStart(2, '0');
-  const hh = String(kst.getUTCHours()).padStart(2, '0');
-  const mi = String(kst.getUTCMinutes()).padStart(2, '0');
-  const ss = String(kst.getUTCSeconds()).padStart(2, '0');
-  return `${yyyy}${mm}${dd}T${hh}${mi}${ss}`;
+  const { y, mo, d, h, mi, s } = toKstParts(utcDate);
+  return `${y}${mo}${d}T${h}${mi}${s}`;
+}
+
+/**
+ * UTC Date → KST 시각의 연/월/일/시/분/초 문자열 (zero-padding).
+ *
+ * 구현 트릭: UTC 시각에 +9h를 더한 새 Date를 만든 뒤 `getUTC*`로 읽으면
+ * 곧바로 KST 값이 나옴 (Asia/Seoul은 DST 없어 +9 고정이라 가능).
+ * 트릭이 호출부로 새지 않도록 이 함수 안에 가둬둠.
+ */
+function toKstParts(utcDate: Date): {
+  y: string; mo: string; d: string; h: string; mi: string; s: string;
+} {
+  const KST_OFFSET_MS = 9 * 60 * 60 * 1000;
+  const shifted = new Date(utcDate.getTime() + KST_OFFSET_MS);
+  return {
+    y: String(shifted.getUTCFullYear()),
+    mo: String(shifted.getUTCMonth() + 1).padStart(2, '0'),
+    d: String(shifted.getUTCDate()).padStart(2, '0'),
+    h: String(shifted.getUTCHours()).padStart(2, '0'),
+    mi: String(shifted.getUTCMinutes()).padStart(2, '0'),
+    s: String(shifted.getUTCSeconds()).padStart(2, '0'),
+  };
 }
 
 /**
@@ -173,6 +194,9 @@ function formatKstCompact(utcDate: Date): string {
  * - 백슬래시: \\ → \\\\
  * - 줄바꿈: \\n → \\n (\\ + n)
  * - 콤마/세미콜론: 앞에 \\
+ *
+ * ⚠️ 순서 중요: 백슬래시를 가장 먼저 치환해야 함.
+ * 다른 escape가 만든 `\\`가 이후 단계에서 다시 escape되면 출력이 깨짐.
  */
 function escapeText(text: string): string {
   return text
