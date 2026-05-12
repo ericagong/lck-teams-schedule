@@ -55,6 +55,36 @@ describe('generateIcs', () => {
     expect(ics).toContain('SUMMARY:T1 vs 젠지 — LCK 2주 차 (Bo3)');
   });
 
+  it('SUMMARY에 플레이오프 stage를 표시한다', () => {
+    const playoff: Match = {
+      ...sampleMatch,
+      tournament: { displayName: 'LCK', stage: '플레이오프' },
+      bestOf: 5,
+    };
+    const ics = generateIcs([playoff], { calendarName: 'T1', now: FIXED_NOW });
+    expect(ics).toContain('SUMMARY:T1 vs 젠지 — LCK 플레이오프 (Bo5)');
+  });
+
+  it('SUMMARY에 결승 stage를 표시한다', () => {
+    const final: Match = {
+      ...sampleMatch,
+      tournament: { displayName: 'LCK', stage: '결승' },
+      bestOf: 5,
+    };
+    const ics = generateIcs([final], { calendarName: 'T1', now: FIXED_NOW });
+    expect(ics).toContain('SUMMARY:T1 vs 젠지 — LCK 결승 (Bo5)');
+  });
+
+  it('SUMMARY에 플레이-인 stage를 표시한다', () => {
+    const playin: Match = {
+      ...sampleMatch,
+      tournament: { displayName: 'LCK', stage: '플레이-인' },
+      bestOf: 3,
+    };
+    const ics = generateIcs([playin], { calendarName: 'T1', now: FIXED_NOW });
+    expect(ics).toContain('SUMMARY:T1 vs 젠지 — LCK 플레이-인 (Bo3)');
+  });
+
   it('canceled 매치는 STATUS:CANCELLED', () => {
     const canceled: Match = { ...sampleMatch, status: 'canceled' };
     const ics = generateIcs([canceled], { calendarName: 'T1', now: FIXED_NOW });
