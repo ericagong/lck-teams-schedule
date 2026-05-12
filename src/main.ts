@@ -23,7 +23,7 @@ async function main(): Promise<void> {
   const allMatches = await fetchSchedule(LEAGUE_IDS.LCK);
   console.log(`[lck-schedule-sync] Fetched ${allMatches.length} LCK matches.`);
 
-  const ics = buildIcsForTeam({
+  const { ics, count } = buildIcsForTeam({
     matches: allMatches,
     teamCode: TEAM_CODE,
     icsOptions: { calendarName: 'T1 LCK 일정' },
@@ -32,9 +32,8 @@ async function main(): Promise<void> {
   await mkdir(dirname(OUTPUT_PATH), { recursive: true });
   await writeFile(OUTPUT_PATH, ics, 'utf-8');
 
-  const matchCount = ics.split('BEGIN:VEVENT').length - 1;
   console.log(
-    `[lck-schedule-sync] Wrote ${matchCount} ${TEAM_CODE} matches → ${OUTPUT_PATH}`,
+    `[lck-schedule-sync] Wrote ${count} ${TEAM_CODE} matches → ${OUTPUT_PATH}`,
   );
 }
 
