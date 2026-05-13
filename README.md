@@ -124,8 +124,10 @@ pnpm typecheck    # 타입 체크만
 ```
 src/
 ├── core/types.ts       # Match, Team 도메인 타입
-├── team-names.ts       # 영문 → 한국어 매핑
-├── lolesports.ts       # API fetcher (유일한 side effect)
+├── team-names.ts       # 영문 → 한국어 매핑 (lolesports fallback 시만 사용)
+├── naver.ts            # 네이버 esports JSON API fetcher (primary, 6 대회)
+├── lolesports.ts       # lolesports API fetcher (fallback only)
+├── data-source.ts      # primary/fallback 합성 (try-catch)
 ├── filter.ts           # filterByTeam (순수)
 ├── ics-generator.ts    # Match[] → ICS string (순수)
 ├── pipeline.ts         # 함수 합성
@@ -134,9 +136,9 @@ src/
 
 ### 설계 원칙
 
-- **SRP**: side effect는 `lolesports.ts`와 `main.ts`에만
-- **순수 함수 우선**: filter, ics-generator, pipeline 모두 테스트 가능
-- **멱등성**: lolesports `match.id`를 ICS UID로 사용 → 갱신 시 같은 이벤트 갱신
+- **SRP**: side effect는 `naver.ts` · `lolesports.ts` · `main.ts` 세 곳에만
+- **순수 함수 우선**: filter, ics-generator, pipeline, parser 모두 테스트 가능
+- **멱등성**: 네이버 `gameId`를 `naver:` 접두로 ICS UID 사용 (lolesports fallback 시 `match.id` 그대로) → 같은 매치는 항상 같은 UID
 - **개인화는 위임**: VALARM 미포함, 캘린더 앱이 알림 책임
 
 자세한 설계 의사결정·트레이드오프·정찰 결과는 [`CLAUDE.md`](./CLAUDE.md) 참조.
@@ -164,12 +166,36 @@ src/
 
 > ⚠️ **자동 갱신을 받으려면 반드시 URL 구독 사용**. Import / 가져오기로 추가하면 일회성 사본만 들어가 자동 갱신 안 됨 (위 ⚠️ 안내 참조).
 
+## 표시 범위 — 최근 4-5개월만
+
+이 ICS는 **과거 3개월 + 현재월 + 미래 1-2개월** (총 5개월 rolling 윈도우) 매치만 담습니다. 캘린더 본질이 "다가오는 일정 관리"라는 판단에서 가벼움을 우선. 자세한 결정 배경은 [`CLAUDE.md`](./CLAUDE.md) "Phase 3 lookback window 결정" 참조.
+
+- T1 약 25 매치 유지 (시간 무관 stable)
+- 4개월+ 전 매치는 자동 사라짐 — 표준 ICS lifecycle (UID 사라지면 캘린더가 자동 삭제)
+- 과거 매치 영구 보존은 Phase 4 `t1-archive.ics` 별도 발행에서 검토 중
+
 ## 향후 계획
 
-- **Phase 1~2 (완료)**: LCK 전 단계(정규·플옵·결승·플레이-인) + 국제 대회 (MSI · Worlds · First Stand) 단일 통합 `.ics`
-- **Phase 3 (다음)**: EWC · KeSPA Cup · 아시안 게임 (네이버 esports JSON API 자동화, T1 출전 확정 시 반응형)
-- **Phase 4**: 응원팀별 다중 `.ics` 발행 (geng.ics 등)
+- **Phase 1~3 (완료)**: LCK · MSI · Worlds · First Stand · EWC · KeSPA Cup 6 대회 — 네이버 esports JSON 단일 primary + lolesports fallback. T1 출전 매치만 단일 `t1.ics` 통합.
+- **Phase 4**: 응원팀별 다중 `.ics` 발행 (geng.ics · dk.ics 등) + 과거 매치 영구 보존 archive ICS 검토
+- 아시안 게임은 4년 주기·데이터 부재로 자동화 범위 외 (다음 AG 시점에 수동 ICS append 또는 별도 메커니즘 고민)
+
+## 데이터 출처 · 비영리 운영
+
+이 프로젝트는 비영리·비상업 팬 프로젝트입니다.
+
+- **Primary**: [네이버 esports](https://game.naver.com/esports) JSON API (비공식, 6 대회 통합)
+- **Fallback**: [lolesports.com](https://lolesports.com/) 비공식 API (네이버 일시 장애 시 자동 전환, 4 대회 — fallback 발동 시 KeSPA·EWC 일시 누락 가능)
+- 외부 API 호출은 매일 2회 고정 (사용자 수 무관 — 사용자는 GitHub Pages에서 `.ics`만 받음)
+- User-Agent에 본 레포 URL 포함 (운영자 식별 가능)
+
+## Takedown · 문의
+
+네이버 또는 lolesports에서 데이터 사용 중단 요청 시 24시간 안에 응답합니다. 운영 채널:
+
+- **GitHub Issue**: [Issues](https://github.com/ericagong/lck-schedule-sync/issues) (가장 빠름)
+- **이메일**: the.erica.gong@gmail.com
 
 ## 라이선스
 
-MIT
+[MIT](./LICENSE)

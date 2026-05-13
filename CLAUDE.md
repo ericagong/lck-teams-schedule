@@ -306,9 +306,19 @@ A. Phase 3 구현 후 1-2주 본인 검증 → B. 1-2개월 후 가까운 T1 팬
 - ✅ 응답 DTO 안정성 — 시즌·대회 무관 `content.keys = ['matches', 'teams', 'userMatchPushGameIds']` 일관
 - ⏭ 아시안 게임 — `asi_lol` ID는 HTML에 있지만 알려진 AG 월에서 데이터 부재 + 4년 주기. **3차 결정으로 Phase 3 자동화 범위에서 제외**, 추후 별도 처리
 
+**Step B (의미 매핑 spot-check)에서 해결됨 (2026-05-13)**:
+
+- ✅ 시작시각: 양쪽 모두 UTC ISO 8601로 도메인 정규화 → **동일**
+- ✅ 팀 코드·한국어명: 네이버는 응답에 자연 한국어("kt 롤스터" 등), lolesports는 `team-names.ts` 매핑 후 동등 수준. 결과 거의 동일 (네이버가 소문자·공백 등 더 정확)
+- ✅ bestOf · status: 도메인 정규화 후 동일
+- ⚠️ **stage 표기 의미 매핑 차이 1건**:
+  - 네이버 `title` = `정규시즌 1R / 정규시즌 2R / 플레이오프 패자조 3R / Road to EWC 2R` (라운드 단위)
+  - lolesports `blockName` = `N주 차 / 플레이오프 / 결승` (주차 단위)
+  - → fallback 발동 시 사용자 SUMMARY가 `LCK 정규시즌 1R` ↔ `LCK 2주 차`로 일시 변경 (시간·팀·대회는 동일)
+  - **결정**: 정규화 함수 추가 X (행동 원칙 #6 "추상화는 두 번째 사례"). fallback 발동은 매일 2회 cron이 다음 회차에서 흡수하는 1회성 → 사용자 불편 최소. 운영 중 실제 fallback 발동 빈도·피드백 보고 정규화 도입 여부 재판단.
+
 **남은 미검증 (Step C·D 또는 운영 단계에서 해결)**:
 
-- 네이버 vs lolesports 동일 매치의 데이터 일치도 — 시작시각, 팀 정보, blockName↔title 의미 매핑 (Step B에서 확정)
 - rate limit · IP 차단 · GitHub Actions runner IP에서 네이버 접근 가능 여부 — Step D에서 dry-run으로 확인
 - fallback 트리거 임계점 — 403/429/네트워크 timeout 어느 시점부터 lolesports로 전환할지 (Step C에서 구현 + Step D에서 강제 fail 시나리오 검증)
 
