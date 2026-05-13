@@ -12,7 +12,7 @@
  * - RFC 5545 라인 폴딩: 75바이트 초과 시 줄바꿈 + 1칸 들여쓰기
  */
 
-import type { Match } from './core/types.js';
+import type { BestOf, Match } from './core/types.js';
 
 const TZID = 'Asia/Seoul';
 const PRODID = '-//lck-schedule-sync//T1//KO';
@@ -25,7 +25,7 @@ const PRODID = '-//lck-schedule-sync//T1//KO';
  * - Bo3: 2~3시간 → 3시간
  * - Bo5: 3.5~5시간 → 4.5시간
  */
-const ESTIMATED_HOURS_BY_BEST_OF: Readonly<Record<1 | 3 | 5, number>> = {
+const ESTIMATED_HOURS_BY_BEST_OF: Readonly<Record<BestOf, number>> = {
   1: 1,
   3: 3,
   5: 4.5,
@@ -47,29 +47,34 @@ export interface IcsOptions {
  */
 export function generateIcs(matches: readonly Match[], options: IcsOptions): string {
   const now = options.now ?? new Date();
-  const lines: string[] = [];
-
-  // Calendar header
-  lines.push('BEGIN:VCALENDAR');
-  lines.push('VERSION:2.0');
-  lines.push(`PRODID:${PRODID}`);
-  lines.push('CALSCALE:GREGORIAN');
-  lines.push('METHOD:PUBLISH');
-  lines.push(`X-WR-CALNAME:${escapeText(options.calendarName)}`);
-  lines.push(`X-WR-TIMEZONE:${TZID}`);
-
-  // VTIMEZONE 블록 (Apple Calendar / Outlook 호환)
-  lines.push(...buildVTimezoneBlock());
-
-  // 각 매치를 VEVENT로
-  for (const match of matches) {
-    lines.push(...buildVEventBlock(match, now));
-  }
-
-  lines.push('END:VCALENDAR');
 
   // RFC 5545: CRLF 줄바꿈, 75바이트 라인 폴딩
-  return lines.map(foldLine).join('\r\n') + '\r\n';
+  return (
+    [
+      ...buildCalendarHeader(options),
+      ...buildVTimezoneBlock(),
+      ...matches.flatMap((match) => buildVEventBlock(match, now)),
+      'END:VCALENDAR',
+    ]
+      .map(foldLine)
+      .join('\r\n') + '\r\n'
+  );
+}
+
+/* ============================================================
+ * Calendar header — VCALENDAR 오프닝 + 메타 필드
+ * ============================================================ */
+
+function buildCalendarHeader(options: IcsOptions): string[] {
+  return [
+    'BEGIN:VCALENDAR',
+    'VERSION:2.0',
+    `PRODID:${PRODID}`,
+    'CALSCALE:GREGORIAN',
+    'METHOD:PUBLISH',
+    `X-WR-CALNAME:${escapeText(options.calendarName)}`,
+    `X-WR-TIMEZONE:${TZID}`,
+  ];
 }
 
 /* ============================================================
@@ -144,7 +149,7 @@ function buildDescription(match: Match): string {
  *
  * API가 종료 시각을 주지 않으므로 ESTIMATED_HOURS_BY_BEST_OF 평균값으로 추정.
  */
-function estimateMatchEnd(startUtc: Date, bestOf: 1 | 3 | 5): Date {
+function estimateMatchEnd(startUtc: Date, bestOf: BestOf): Date {
   const durationMs = ESTIMATED_HOURS_BY_BEST_OF[bestOf] * 60 * 60 * 1000;
   return new Date(startUtc.getTime() + durationMs);
 }

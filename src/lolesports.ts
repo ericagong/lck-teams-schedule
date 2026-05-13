@@ -6,6 +6,7 @@
  */
 
 import type { Match, MatchStatus } from './core/types.js';
+import { normalizeBestOf } from './core/types.js';
 import { toKoreanTeamName } from './team-names.js';
 
 const API_BASE = 'https://esports-api.lolesports.com/persisted/gw';
@@ -22,17 +23,20 @@ export const LEAGUE_IDS = {
  * Side effect (fetch)
  * ============================================================ */
 
+/** 페이지네이션 무한 루프 방지 상한. lolesports 한 리그가 50페이지를 넘는 일은 없음. */
+const MAX_PAGES_PER_LEAGUE = 50;
+
 /**
  * 지정 리그의 전체 스케줄을 fetch.
  *
  * pageToken으로 페이지네이션 처리. 모든 페이지를 합쳐서 반환.
+ * MAX_PAGES_PER_LEAGUE 도달 시 throw (무한 루프 방어).
  */
 export async function fetchSchedule(leagueId: string): Promise<Match[]> {
   const allMatches: Match[] = [];
   let pageToken: string | undefined = undefined;
-  let safetyGuard = 0; // 무한 루프 방지
 
-  do {
+  for (let page = 0; page < MAX_PAGES_PER_LEAGUE; page++) {
     const url = buildScheduleUrl(leagueId, pageToken);
     const response = await fetch(url, { headers: { 'x-api-key': API_KEY } });
 
@@ -43,15 +47,12 @@ export async function fetchSchedule(leagueId: string): Promise<Match[]> {
     const json = (await response.json()) as ScheduleApiResponse;
     const { matches, nextPageToken } = parseScheduleResponse(json);
     allMatches.push(...matches);
+
+    if (nextPageToken === undefined) return allMatches;
     pageToken = nextPageToken;
+  }
 
-    safetyGuard += 1;
-    if (safetyGuard > 50) {
-      throw new Error('Pagination safety guard tripped: >50 pages');
-    }
-  } while (pageToken !== undefined);
-
-  return allMatches;
+  throw new Error(`Pagination safety guard tripped: >${MAX_PAGES_PER_LEAGUE} pages`);
 }
 
 /**
@@ -169,11 +170,6 @@ function toMatch(event: ScheduleEvent): Match | null {
     bestOf,
     status: normalizeStatus(event.state),
   };
-}
-
-function normalizeBestOf(count: number | undefined): 1 | 3 | 5 | null {
-  if (count === 1 || count === 3 || count === 5) return count;
-  return null;
 }
 
 function normalizeStatus(state: string): MatchStatus {

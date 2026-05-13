@@ -10,6 +10,7 @@
  */
 
 import type { Match, MatchStatus } from './core/types.js';
+import { normalizeBestOf } from './core/types.js';
 
 const API_BASE = 'https://esports-api.game.naver.com/service/v2';
 
@@ -105,15 +106,15 @@ export async function fetchNaverScheduleMonth(
  */
 export async function fetchAllNaverMatches(): Promise<Match[]> {
   const months = enumerateMonths(new Date(), MONTHS_BEFORE, MONTHS_AHEAD);
+  const leagueIds = Object.values(NAVER_LEAGUE_IDS);
   const all: Match[] = [];
-  let first = true;
-  for (const topLeagueId of Object.values(NAVER_LEAGUE_IDS)) {
-    for (const ym of months) {
-      if (!first) await sleep(THROTTLE_MS);
-      first = false;
-      const matches = await fetchNaverScheduleMonth(topLeagueId, ym);
-      all.push(...matches);
-    }
+
+  // 한 번에 (league, month) 쌍을 평탄화 → 첫 호출만 throttle 면제.
+  const calls = leagueIds.flatMap((id) => months.map((ym) => ({ id, ym })));
+  for (const [i, { id, ym }] of calls.entries()) {
+    if (i > 0) await sleep(THROTTLE_MS);
+    const matches = await fetchNaverScheduleMonth(id, ym);
+    all.push(...matches);
   }
   return all;
 }
@@ -126,24 +127,21 @@ function sleep(ms: number): Promise<void> {
  * `start`의 UTC 월을 기준으로 (현재월-before … 현재월 … 현재월+after-1) "YYYY-MM" 배열.
  * UTC 기준 — TZ 영향 회피, 결정성 확보 (테스트 가능).
  *
- * 예: enumerateMonths(2026-05-13, 2, 3) = [2026-03, 2026-04, 2026-05, 2026-06, 2026-07]
+ * 음수·12 초과 월은 `Date.UTC`의 overflow 처리에 위임 (표준 동작):
+ * `new Date(Date.UTC(2026, -1, 1))` → 2025-12-01.
+ *
+ * 예: enumerateMonths(2026-05-13, 3, 2) = [2026-02, 03, 04, 05, 06]
  */
 export function enumerateMonths(start: Date, before: number, after: number): string[] {
-  const startYear = start.getUTCFullYear();
-  const startMonth = start.getUTCMonth() + 1; // 1-12
-
-  const total = before + after;
+  const year = start.getUTCFullYear();
+  const monthIndex = start.getUTCMonth();
   const out: string[] = [];
 
-  // 시작 인덱스: 0 = (현재월 - before)
-  // 월을 1-기반으로 계산 시 음수가 생길 수 있어 12로 normalize.
-  for (let i = 0; i < total; i++) {
-    const monthOffset = startMonth - before + i; // 음수 가능
-    const yearDelta = Math.floor((monthOffset - 1) / 12);
-    let month = ((monthOffset - 1) % 12) + 1;
-    if (month <= 0) month += 12;
-    const year = startYear + yearDelta;
-    out.push(`${year}-${String(month).padStart(2, '0')}`);
+  for (let i = -before; i < after; i++) {
+    const d = new Date(Date.UTC(year, monthIndex + i, 1));
+    const y = d.getUTCFullYear();
+    const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+    out.push(`${y}-${m}`);
   }
   return out;
 }
@@ -232,11 +230,6 @@ function toMatch(item: NaverMatch, displayName: string): Match | null {
     bestOf,
     status: normalizeStatus(item.matchStatus),
   };
-}
-
-function normalizeBestOf(count: number | undefined): 1 | 3 | 5 | null {
-  if (count === 1 || count === 3 || count === 5) return count;
-  return null;
 }
 
 function normalizeStatus(status: string): MatchStatus {

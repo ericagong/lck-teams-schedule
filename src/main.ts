@@ -29,20 +29,25 @@ const OUTPUT_PATH = resolve(process.cwd(), 'public', 't1.ics');
 const FALLBACK_MARKER_PATH = resolve(process.cwd(), '.fetch-source');
 const TEAM_CODE = 'T1';
 
+const LOG_PREFIX = '[lck-schedule-sync]';
+const log = {
+  info: (msg: string) => console.log(`${LOG_PREFIX} ${msg}`),
+  warn: (msg: string) => console.warn(`${LOG_PREFIX} ⚠️  ${msg}`),
+  error: (msg: string, err: unknown) => console.error(`${LOG_PREFIX} FATAL: ${msg}`, err),
+};
+
 async function main(): Promise<void> {
-  console.log('[lck-schedule-sync] Fetching from Naver esports (primary)…');
+  log.info('네이버 esports에서 fetch 시작 (primary)…');
   const fetched = await fetchWithFallback(fetchAllNaverMatches, fetchFromLolesports, {
     primaryName: 'Naver esports',
     fallbackName: 'lolesports (Phase 2 코드)',
   });
 
   if (fetched.source === 'primary') {
-    console.log(
-      `[lck-schedule-sync] Naver returned ${fetched.matches.length} matches across 6 leagues.`,
-    );
+    log.info(`네이버 응답 ${fetched.matches.length}개 매치 (6 대회 통합).`);
   } else {
-    console.warn(
-      `[lck-schedule-sync] ⚠️  Lolesports fallback returned ${fetched.matches.length} matches. KeSPA·EWC는 lolesports 미커버라 누락됨 — 다음 cron에서 정상 회복 기대.`,
+    log.warn(
+      `lolesports fallback 응답 ${fetched.matches.length}개 매치. KeSPA·EWC는 lolesports 미커버라 누락됨 — 다음 cron에서 정상 회복 기대.`,
     );
   }
 
@@ -56,12 +61,10 @@ async function main(): Promise<void> {
   await writeFile(OUTPUT_PATH, ics, 'utf-8');
   await writeFile(FALLBACK_MARKER_PATH, fetched.source, 'utf-8');
 
-  console.log(
-    `[lck-schedule-sync] Wrote ${count} ${TEAM_CODE} matches → ${OUTPUT_PATH} (source=${fetched.source})`,
-  );
+  log.info(`${count}개 ${TEAM_CODE} 매치 → ${OUTPUT_PATH} 기록 완료 (source=${fetched.source}).`);
 }
 
 main().catch((err) => {
-  console.error('[lck-schedule-sync] FATAL:', err);
+  log.error('main() 실패', err);
   process.exit(1);
 });
