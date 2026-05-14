@@ -12,7 +12,7 @@
  * - RFC 5545 라인 폴딩: 75바이트 초과 시 줄바꿈 + 1칸 들여쓰기
  */
 
-import type { BestOf, Match } from './core/types.js';
+import type { BestOf, Match } from './types.js';
 
 const TZID = 'Asia/Seoul';
 const PRODID = '-//lck-schedule-sync//T1//KO';
@@ -41,19 +41,24 @@ export interface IcsOptions {
 /**
  * Match 배열을 ICS 문자열로 변환.
  *
+ * 입력 매치는 내부에서 시작 시각 오름차순 정렬 — RFC 5545는 VEVENT 순서를
+ * 강제하지 않지만, deterministic 출력은 디버깅·diff·캘린더 표시 안정성에 필수.
+ * 호출처는 정렬 신경 안 씀.
+ *
  * 사용 예:
  *   const ics = generateIcs(t1Matches, { calendarName: 'T1 LCK 일정' });
  *   fs.writeFileSync('public/t1.ics', ics);
  */
 export function generateIcs(matches: readonly Match[], options: IcsOptions): string {
   const now = options.now ?? new Date();
+  const sorted = [...matches].sort((a, b) => a.startsAt.localeCompare(b.startsAt));
 
   // RFC 5545: CRLF 줄바꿈, 75바이트 라인 폴딩
   return (
     [
       ...buildCalendarHeader(options),
       ...buildVTimezoneBlock(),
-      ...matches.flatMap((match) => buildVEventBlock(match, now)),
+      ...sorted.flatMap((match) => buildVEventBlock(match, now)),
       'END:VCALENDAR',
     ]
       .map(foldLine)

@@ -3,7 +3,7 @@
  *
  * side effect:
  * 1) 네이버 esports에서 6 대회 매치 fetch (naver.ts)
- * 2) T1 ICS 생성 (pipeline.ts)
+ * 2) T1 활성 매치 선별 + ICS 직조 (filter.ts → ics-generator.ts)
  * 3) public/t1.ics 기록
  *
  * GitHub Actions에서 `pnpm dev` 또는 `tsx src/main.ts`로 실행.
@@ -18,11 +18,14 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 
+import { selectActiveTeamMatches } from './filter.js';
+import { generateIcs } from './ics-generator.js';
 import { fetchAllNaverMatches } from './naver.js';
-import { buildIcsForTeam } from './pipeline.js';
 
-const OUTPUT_PATH = resolve(process.cwd(), 'public', 't1.ics');
+// resolve()는 인자가 모두 상대 경로면 자동으로 process.cwd() 기준 절대화.
+const OUTPUT_PATH = resolve('public', 't1.ics');
 const TEAM_CODE = 'T1';
+const CALENDAR_NAME = 'T1 LCK 일정';
 
 const LOG_PREFIX = '[lck-schedule-sync]';
 const log = {
@@ -35,17 +38,13 @@ async function main(): Promise<void> {
   const matches = await fetchAllNaverMatches();
   log.info(`네이버 응답 ${matches.length}개 매치 (6 대회 통합).`);
 
-  // TODO: 굳이 파일 분리 불필요함
-  const { ics, count } = buildIcsForTeam({
-    matches,
-    teamCode: TEAM_CODE,
-    icsOptions: { calendarName: 'T1 LCK 일정' },
-  });
+  const teamMatches = selectActiveTeamMatches(matches, TEAM_CODE);
+  const ics = generateIcs(teamMatches, { calendarName: CALENDAR_NAME });
 
   await mkdir(dirname(OUTPUT_PATH), { recursive: true });
   await writeFile(OUTPUT_PATH, ics, 'utf-8');
 
-  log.info(`${count}개 ${TEAM_CODE} 매치 → ${OUTPUT_PATH} 기록 완료.`);
+  log.info(`${teamMatches.length}개 ${TEAM_CODE} 매치 → ${OUTPUT_PATH} 기록 완료.`);
 }
 
 main().catch((err) => {

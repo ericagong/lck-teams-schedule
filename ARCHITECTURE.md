@@ -36,40 +36,34 @@ flowchart TD
 
 ---
 
-## 2. 데이터 가공 파이프라인 (6단계)
+## 2. 데이터 가공 파이프라인 (4단계)
 
 ```mermaid
 flowchart TD
     rawJson[네이버 esports JSON]
     rawJson -->|"① fetch + parse<br/>naver.ts"| matches[Match<br/>도메인 객체 7 필드]
-    matches -->|"② filterByTeam 'T1'<br/>filter.ts"| t1Only[T1 매치만]
-    t1Only -->|"③ excludeCanceled<br/>filter.ts"| active[활성 매치만]
-    active -->|"④ sortByStartTime<br/>pipeline.ts"| sorted[정렬된 Match]
-    sorted -->|"⑤ generateIcs<br/>ics-generator.ts"| ics[ICS 문자열<br/>RFC 5545]
-    ics -->|"⑥ writeFile<br/>main.ts"| output[public/t1.ics]
+    matches -->|"② selectActiveTeamMatches<br/>filter.ts"| active[T1 활성 매치만]
+    active -->|"③ generateIcs (sort 내장)<br/>ics-generator.ts"| ics[ICS 문자열<br/>RFC 5545]
+    ics -->|"④ writeFile<br/>main.ts"| output[public/t1.ics]
 
     style rawJson fill:#F1EFE8,stroke:#888780,color:#2C2C2A
     style matches fill:#EEEDFE,stroke:#7F77DD,color:#26215C
-    style t1Only fill:#EEEDFE,stroke:#7F77DD,color:#26215C
     style active fill:#EEEDFE,stroke:#7F77DD,color:#26215C
-    style sorted fill:#EEEDFE,stroke:#7F77DD,color:#26215C
     style ics fill:#E1F5EE,stroke:#1D9E75,color:#04342C
     style output fill:#F1EFE8,stroke:#888780,color:#2C2C2A
 
     linkStyle 0 stroke:#BA7517,stroke-width:2px
-    linkStyle 5 stroke:#BA7517,stroke-width:2px
+    linkStyle 3 stroke:#BA7517,stroke-width:2px
 ```
 
-호박색 화살표(①, ⑥)만 side effect. ②~⑤는 전부 순수 함수 → 단위 테스트의 토대.
+호박색 화살표(①, ④)만 side effect. ②~③은 전부 순수 함수 → 단위 테스트의 토대.
 
-| #   | 단계           | 순수?          | 파일 · 함수                      |
-| --- | -------------- | -------------- | -------------------------------- |
-| ①   | fetch + parse  | ❌ side effect | `naver.ts:fetchAllNaverMatches`  |
-| ②   | 팀 필터        | ✅             | `filter.ts:filterByTeam`         |
-| ③   | 취소 매치 제외 | ✅             | `filter.ts:excludeCanceled`      |
-| ④   | 시작 시각 정렬 | ✅             | `pipeline.ts:sortByStartTime`    |
-| ⑤   | ICS 직조       | ✅             | `ics-generator.ts:generateIcs`   |
-| ⑥   | 파일 쓰기      | ❌ side effect | `main.ts` — `public/t1.ics` 출력 |
+| #   | 단계                      | 순수?          | 파일 · 함수                         |
+| --- | ------------------------- | -------------- | ----------------------------------- |
+| ①   | fetch + parse             | ❌ side effect | `naver.ts:fetchAllNaverMatches`     |
+| ②   | 팀 활성 매치 선별         | ✅             | `filter.ts:selectActiveTeamMatches` |
+| ③   | ICS 직조 (시작 시각 정렬) | ✅             | `ics-generator.ts:generateIcs`      |
+| ④   | 파일 쓰기                 | ❌ side effect | `main.ts` — `public/t1.ics` 출력    |
 
 ---
 
@@ -77,18 +71,18 @@ flowchart TD
 
 ### 3.1 ① parse + normalize — raw API → 도메인 7필드
 
-가장 정보 손실이 큰 단계. `naver.ts:toMatch`에 결정을 응축 → ②~⑥은 source 무관 (다른 소스로 전환할 일이 생겨도 ②~⑥은 그대로).
+가장 정보 손실이 큰 단계. `naver.ts:parseNaverResponse`의 for-of + continue 가드에 결정을 응축 → ②~④는 source 무관 (다른 소스로 전환할 일이 생겨도 ②~④는 그대로).
 
-| 행위                                                    | 처리 위치                                                                    |
-| ------------------------------------------------------- | ---------------------------------------------------------------------------- |
-| 타입 가드 (TBD, teams.length, 누락 필드 등) silent drop | `naver.ts:toMatch`                                                           |
-| 시간 정규화 → UTC ISO                                   | `new Date(startDate).toISOString()` (epoch ms → ISO)                         |
-| `bestOf` 1·3·5만 허용, 외는 drop                        | `core/types.ts:normalizeBestOf` (Bo2·Bo7 silent drop, 회귀 테스트로 못 박음) |
-| status 정규화 (3값으로 축소)                            | `matchStatus` → `normalizeStatus` (`scheduled` · `completed` · `canceled`)   |
-| 한국어 팀 displayName                                   | `homeTeam.name` 그대로 (네이버 응답이 한국어 자연 풍부)                      |
-| UID 멱등성 + namespace                                  | `naver:${gameId}` 접두 (소스 전환 시 충돌 회피용 namespace)                  |
+| 행위                                                    | 처리 위치                                                                  |
+| ------------------------------------------------------- | -------------------------------------------------------------------------- |
+| 타입 가드 (TBD, teams.length, 누락 필드 등) silent drop | `naver.ts:parseNaverResponse`                                              |
+| 시간 정규화 → UTC ISO                                   | `new Date(startDate).toISOString()` (epoch ms → ISO)                       |
+| `bestOf` 1·3·5만 허용, 외는 drop                        | `naver.ts:parseNaverResponse` (Bo2·Bo7 silent skip, type narrowing 가드)   |
+| status 정규화 (3값으로 축소)                            | `matchStatus` → `normalizeStatus` (`scheduled` · `completed` · `canceled`) |
+| 한국어 팀 displayName                                   | `homeTeam.name` 그대로 (네이버 응답이 한국어 자연 풍부)                    |
+| UID 멱등성 + namespace                                  | `naver:${gameId}` 접두 (소스 전환 시 충돌 회피용 namespace)                |
 
-### 3.2 ⑤ generateIcs — RFC 5545 직조
+### 3.2 ③ generateIcs — RFC 5545 직조 (시작 시각 정렬 내장)
 
 | 변환                                   | 코드 위치                              | 비고                                                             |
 | -------------------------------------- | -------------------------------------- | ---------------------------------------------------------------- |
@@ -133,7 +127,7 @@ interface NaverMatch {
 
 ### 4.2 Match — 도메인 객체
 
-`src/core/types.ts`. 7 top-level 필드, 불변·`readonly` 강제. 소스가 바뀌어도 이 모양이 변경 차단막.
+`src/types.ts`. 7 top-level 필드, 불변·`readonly` 강제. 소스가 바뀌어도 이 모양이 변경 차단막.
 
 ```ts
 interface Match {

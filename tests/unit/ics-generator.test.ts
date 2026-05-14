@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { Match } from '../../src/core/types.js';
+import type { Match } from '../../src/types.js';
 import { generateIcs } from '../../src/ics-generator.js';
 
 const FIXED_NOW = new Date('2026-05-12T03:00:00Z');
@@ -122,6 +122,31 @@ describe('generateIcs', () => {
     const a = generateIcs([sampleMatch], { calendarName: 'T1', now: FIXED_NOW });
     const b = generateIcs([sampleMatch], { calendarName: 'T1', now: FIXED_NOW });
     expect(a).toBe(b);
+  });
+
+  describe('VEVENT 정렬 (deterministic 출력)', () => {
+    const m1: Match = { ...sampleMatch, id: 'm1', startsAt: '2026-05-15T10:00:00Z' };
+    const m2: Match = { ...sampleMatch, id: 'm2', startsAt: '2026-05-10T10:00:00Z' };
+    const m3: Match = { ...sampleMatch, id: 'm3', startsAt: '2026-05-12T10:00:00Z' };
+
+    it('입력 순서와 무관하게 시작 시각 오름차순으로 VEVENT를 배치한다', () => {
+      const ics = generateIcs([m1, m2, m3], { calendarName: 'T1', now: FIXED_NOW });
+      const uidOrder = [...ics.matchAll(/UID:(m\d+)@/g)].map((mt) => mt[1]);
+      expect(uidOrder).toEqual(['m2', 'm3', 'm1']);
+    });
+
+    it('입력 배열을 변경하지 않는다 (순수성)', () => {
+      const input = [m1, m2, m3];
+      const originalIds = input.map((m) => m.id);
+      generateIcs(input, { calendarName: 'T1', now: FIXED_NOW });
+      expect(input.map((m) => m.id)).toEqual(originalIds);
+    });
+
+    it('입력 순서가 달라도 같은 ICS를 만든다 (순서 독립성)', () => {
+      const a = generateIcs([m1, m2, m3], { calendarName: 'T1', now: FIXED_NOW });
+      const b = generateIcs([m3, m1, m2], { calendarName: 'T1', now: FIXED_NOW });
+      expect(a).toBe(b);
+    });
   });
 
   describe('RFC 5545 line folding (75바이트 경계)', () => {

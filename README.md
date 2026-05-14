@@ -123,18 +123,17 @@ pnpm typecheck    # 타입 체크만
 
 ```
 src/
-├── core/types.ts       # Match, Team 도메인 타입
+├── types.ts            # Match, Team 도메인 타입
 ├── naver.ts            # 네이버 esports JSON API fetcher (6 대회)
-├── filter.ts           # filterByTeam (순수)
+├── filter.ts           # selectActiveTeamMatches (순수)
 ├── ics-generator.ts    # Match[] → ICS string (순수)
-├── pipeline.ts         # 함수 합성
 └── main.ts             # 진입점
 ```
 
 ### 설계 원칙
 
 - **SRP**: side effect는 `naver.ts` · `main.ts` 두 곳에만
-- **순수 함수 우선**: filter, ics-generator, pipeline, parser 모두 테스트 가능
+- **순수 함수 우선**: filter, ics-generator, parser 모두 테스트 가능
 - **멱등성**: 네이버 `gameId`를 `naver:` 접두로 ICS UID 사용 → 같은 매치는 항상 같은 UID
 - **개인화는 위임**: VALARM 미포함, 캘린더 앱이 알림 책임
 

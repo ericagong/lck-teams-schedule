@@ -19,8 +19,7 @@
 
 import { readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import type { Match } from '../src/core/types.js';
-import { excludeCanceled } from '../src/filter.js';
+import type { Match } from '../src/types.js';
 import { generateIcs } from '../src/ics-generator.js';
 import {
   NAVER_LEAGUE_DISPLAY_NAMES,
@@ -56,15 +55,16 @@ for (const file of files) {
   perFile.push({ file, topLeagueId, count: matches.length });
 }
 
-const active = excludeCanceled(all);
-const sorted = [...active].sort((a, b) => a.startsAt.localeCompare(b.startsAt));
+// 무필터 시각 검증 스크립트 — production 추상화(selectActiveTeamMatches) 비의존.
+// 팀 필터 없이 6 대회 raw 캡처 그대로. 정렬은 generateIcs가 책임.
+const active = all.filter((m) => m.status !== 'canceled');
 
-const ics = generateIcs(sorted, {
+const ics = generateIcs(active, {
   calendarName: 'Phase 3 검증 — Naver 6 대회 전체 (무필터)',
 });
 writeFileSync(OUTPUT, ics);
 
-console.log(`✓ ${sorted.length} matches → ${OUTPUT}\n`);
+console.log(`✓ ${active.length} matches → ${OUTPUT}\n`);
 
 console.log('--- 파일별 캡처 분포 ---');
 for (const r of perFile) {
@@ -75,7 +75,7 @@ for (const r of perFile) {
 
 const counts = new Map<string, number>();
 const stages = new Map<string, Set<string>>();
-for (const m of sorted) {
+for (const m of active) {
   const league = m.tournament.displayName;
   counts.set(league, (counts.get(league) ?? 0) + 1);
   if (!stages.has(league)) stages.set(league, new Set());

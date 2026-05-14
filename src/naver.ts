@@ -9,8 +9,7 @@
  * - matches/teams 구조는 시즌·대회 무관 동일 (Step A 정찰 검증 완료)
  */
 
-import type { Match, MatchStatus } from './core/types.js';
-import { normalizeBestOf } from './core/types.js';
+import type { BestOf, Match, MatchStatus } from './types.js';
 
 const API_BASE = 'https://esports-api.game.naver.com/service/v2';
 
@@ -34,12 +33,15 @@ export const NAVER_LEAGUE_IDS = {
 } as const;
 
 /**
- * topLeagueId → ICS SUMMARY 표시명.
+ * topLeagueId → ICS SUMMARY 표시명 매핑.
  *
- * 네이버 응답에 inline displayName 필드 없음 → parser 호출부에서 주입.
- * (응답에는 topLeagueId만 있고 사람이 읽을 league.name 필드는 없음)
+ * 왜 필요한가: 네이버 응답에 사람용 league 이름 필드가 없음 (10개 fixture 검증 완료).
+ * 응답에 있는 league 관련 필드는 모두 식별자(ID)뿐:
+ *   - `topLeagueId`: "lck", "world_championship" 등 (raw ID — UX 부적합)
+ *   - `leagueId`: "lck_2026" 등 (연도 suffix 매년 변동 — 안정성 부적합)
+ *   - `title`: "정규시즌 1R" 등 (라운드명 — 대회명 아님)
+ * 따라서 ICS SUMMARY 표시용 한국어 대회명은 호출부에서 주입.
  */
-// TODO: 대체 이 용도가 뭔지 모르겠어. 이거 안쓰고 네이버 응답에 있는 데이터를 그대로 쓰면 되는거 아닌가?
 export const NAVER_LEAGUE_DISPLAY_NAMES: Record<string, string> = {
   lck: 'LCK',
   msi: 'MSI',
@@ -83,28 +85,50 @@ const THROTTLE_MS = 250;
  *
  * 200 외 응답은 throw → main()까지 propagate되어 워크플로 실패.
  * invalid ID·빈 월은 200 + matches=[] → 자연 빈 배열 반환.
+ *
+ * 쿼리 파라미터:
+ *   - `relay=false`: 응답 매치 필드 `relay` 자체 값과 무관하게 모든 매치를 받는 안정 값.
+ *     true는 중계 메타가 포함된 형태로 응답을 변형할 가능성이 있어 사용 안 함.
+ *
+ * 헤더:
+ *   - User-Agent: `product/version (comment)` RFC 7231 표준 형식.
+ *     `+URL` 접두는 봇·크롤러가 contact URL을 표시하는 관행 (Googlebot 등).
  */
 export async function fetchNaverScheduleMonth(
   topLeagueId: string,
   yearMonth: string,
 ): Promise<Match[]> {
-  // TODO: 아니 relay는 대체 무슨 역할일까?
   const url = `${API_BASE}/schedule/month?month=${yearMonth}&topLeagueId=${topLeagueId}&relay=false`;
-  // TODO: 원래 user-agent 필드가 이걸 넣는게 맞나?
   const response = await fetch(url, { headers: { 'User-Agent': USER_AGENT } });
 
   if (!response.ok) {
-    // TODO: 이 부분도 응답 케이스에 따라 좀 세분화해서 나누는게 나을지? 아니면 지금 단계에서는 외부의 영역이므로 생길 때마다 넣는게 나을지?
-    // TODO: 나는 후자라고 보는데, 최소한 에러 코드는 알려줘야 할듯.
-    throw new Error(
-      `Naver esports API failed: ${response.status} ${response.statusText} (topLeagueId=${topLeagueId}, month=${yearMonth})`,
-    );
+    throw new Error(buildFetchErrorMessage(response, topLeagueId, yearMonth));
   }
 
   const json = (await response.json()) as NaverScheduleResponse;
   const displayName = NAVER_LEAGUE_DISPLAY_NAMES[topLeagueId] ?? 'Unknown';
   const { matches } = parseNaverResponse(json, displayName);
   return matches;
+}
+
+/**
+ * 운영 진단 용도 — GitHub Actions 로그에서 한눈에 원인 파악.
+ * 처리는 모두 throw 동일, 메시지만 status code별 분기.
+ */
+function buildFetchErrorMessage(
+  response: Response,
+  topLeagueId: string,
+  yearMonth: string,
+): string {
+  const ctx = `topLeagueId=${topLeagueId}, month=${yearMonth}`;
+  const status = `${response.status} ${response.statusText}`;
+  if (response.status === 429) {
+    return `Naver esports rate limit (429) — throttle 부족 or burst. ${status} (${ctx})`;
+  }
+  if (response.status >= 500) {
+    return `Naver esports 서버 장애 (${response.status}) — 재시도 다음 cron. ${status} (${ctx})`;
+  }
+  return `Naver esports API failed: ${status} (${ctx})`;
 }
 
 /**
@@ -134,11 +158,17 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-// TODO: 왜 enumerateMonths로 배열화해야하는지?
 /**
  * `start`의 UTC 월을 기준으로 (현재월-before … 현재월 … 현재월+after-1) "YYYY-MM" 배열.
- * UTC 기준 — TZ 영향 회피, 결정성 확보 (테스트 가능).
  *
+ * 왜 함수로 분리·배열화하는가:
+ *   - 시간 처리는 silently 깨지기 쉬운 영역 (UTC vs local TZ, 12월 → 1월 overflow,
+ *     한 자릿수 월 padding) → 순수 함수로 격리해 단위 테스트(6건)로 못 박음.
+ *   - fetchAllNaverMatches는 배열을 flatMap으로 (league, month) 쌍으로 평탄화하므로
+ *     단일 for 루프에서 "첫 호출만 throttle 면제" 패턴이 한 줄로 표현됨.
+ *   - 결과 30개·~150 bytes로 메모리 영향 미미. generator/inline보다 단순.
+ *
+ * UTC 기준 — TZ 영향 회피, 결정성 확보.
  * 음수·12 초과 월은 `Date.UTC`의 overflow 처리에 위임 (표준 동작):
  * `new Date(Date.UTC(2026, -1, 1))` → 2025-12-01.
  *
@@ -203,46 +233,37 @@ export function parseNaverResponse(
   response: NaverScheduleResponse,
   displayName: string,
 ): { readonly matches: Match[] } {
-  const matches: Match[] = [];
   const items = response.content?.matches ?? [];
+  const matches: Match[] = [];
+
   for (const item of items) {
-    const m = toMatch(item, displayName);
-    if (m !== null) matches.push(m);
+    // 가드: 도메인 밖 매치는 silent skip
+    const home = item.homeTeam;
+    const away = item.awayTeam;
+    if (!home || !away) continue;
+    if (!home.nameEngAcronym || !away.nameEngAcronym) continue;
+    if (!home.name || !away.name) continue;
+
+    // Bo2/Bo7 등 도메인 외 값 silent skip — type narrowing
+    const count = item.maxMatchCount;
+    if (count !== 1 && count !== 3 && count !== 5) continue;
+    const bestOf: BestOf = count;
+
+    if (!Number.isFinite(item.startDate)) continue;
+
+    // 변환: raw → Match
+    matches.push({
+      id: `naver:${item.gameId}`,
+      tournament: { displayName, stage: item.title ?? '' },
+      teamA: { code: home.nameEngAcronym, displayName: home.name },
+      teamB: { code: away.nameEngAcronym, displayName: away.name },
+      startsAt: new Date(item.startDate).toISOString(),
+      bestOf,
+      status: normalizeStatus(item.matchStatus),
+    });
   }
+
   return { matches };
-}
-
-// TODO: 결국 이게 우리 DTO로 바꾸는건데, 위에 너무 함수분리가 많은 거 같음...
-function toMatch(item: NaverMatch, displayName: string): Match | null {
-  const home = item.homeTeam;
-  const away = item.awayTeam;
-  if (!home || !away) return null;
-  if (!home.nameEngAcronym || !away.nameEngAcronym) return null;
-  if (!home.name || !away.name) return null;
-
-  const bestOf = normalizeBestOf(item.maxMatchCount);
-  if (bestOf === null) return null;
-
-  if (!Number.isFinite(item.startDate)) return null;
-
-  return {
-    id: `naver:${item.gameId}`,
-    tournament: {
-      displayName,
-      stage: item.title ?? '',
-    },
-    teamA: {
-      code: home.nameEngAcronym,
-      displayName: home.name,
-    },
-    teamB: {
-      code: away.nameEngAcronym,
-      displayName: away.name,
-    },
-    startsAt: new Date(item.startDate).toISOString(),
-    bestOf,
-    status: normalizeStatus(item.matchStatus),
-  };
 }
 
 function normalizeStatus(status: string): MatchStatus {
