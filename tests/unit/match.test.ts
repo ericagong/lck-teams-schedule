@@ -2,19 +2,54 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { Match } from '../../src/match.js';
-import type { NaverMatch, NaverScheduleResponse } from '../../src/naver.js';
+import { toMatch, toMatches } from '../../src/naver.js';
+import { LEAGUE_DISPLAY_NAME } from '../../src/league.js';
 
-function loadFixture(name: string): NaverScheduleResponse {
+type NaverEnvelope = { content: { matches: unknown[] } | null };
+
+function loadFixture(name: string): NaverEnvelope {
   const path = resolve(__dirname, `../../fixtures/${name}`);
-  return JSON.parse(readFileSync(path, 'utf-8')) as NaverScheduleResponse;
+  return JSON.parse(readFileSync(path, 'utf-8')) as NaverEnvelope;
 }
 
 function parseFixture(name: string): Match[] {
   const response = loadFixture(name);
-  return Match.fromList(response.content?.matches ?? []);
+  return toMatches(response.content?.matches ?? []);
 }
 
-describe('Match.from — LCK sample', () => {
+/**
+ * 테스트 raw 빌더 — Naver 응답 모양(unknown raw)을 만듦.
+ * 새 toMatch는 zod safeParse를 통과해야 통과 — 빈 문자열·null·non-Bo 모두 검증 시나리오.
+ */
+type RawOverrides = {
+  gameId?: string;
+  topLeagueId?: string;
+  title?: string;
+  startDate?: number;
+  maxMatchCount?: number;
+  matchStatus?: string;
+  homeTeam?: { name: string; nameEngAcronym: string } | null;
+  awayTeam?: { name: string; nameEngAcronym: string } | null;
+};
+
+function makeRaw(overrides: RawOverrides = {}): unknown {
+  return {
+    gameId: overrides.gameId ?? 'g1',
+    topLeagueId: overrides.topLeagueId ?? 'lck',
+    title: overrides.title ?? '정규시즌 1R',
+    startDate: overrides.startDate ?? 1777622400000,
+    maxMatchCount: overrides.maxMatchCount ?? 3,
+    matchStatus: overrides.matchStatus ?? 'BEFORE',
+    homeTeam:
+      overrides.homeTeam === undefined ? { name: 'T1', nameEngAcronym: 'T1' } : overrides.homeTeam,
+    awayTeam:
+      overrides.awayTeam === undefined
+        ? { name: '젠지', nameEngAcronym: 'GEN' }
+        : overrides.awayTeam,
+  };
+}
+
+describe('toMatch — LCK sample fixture', () => {
   const matches = parseFixture('naver-lck-sample.json');
 
   it('샘플 4개 매치 모두 Match로 변환', () => {
@@ -29,15 +64,15 @@ describe('Match.from — LCK sample', () => {
     expect(matches[0]?.startsAt).toBe('2026-05-01T08:00:00.000Z');
   });
 
-  it('title → tournament.stage', () => {
-    expect(matches[0]?.tournament.stage).toBe('정규시즌 1R');
+  it('title → stage', () => {
+    expect(matches[0]?.stage).toBe('정규시즌 1R');
   });
 
-  it('topLeagueId → LEAGUES 룩업 → tournament.displayName', () => {
-    expect(matches[0]?.tournament.displayName).toBe('LCK');
+  it('topLeagueId → 도메인 League (LCK)', () => {
+    expect(matches[0]?.league).toBe('LCK');
   });
 
-  it('homeTeam → teamA (code = nameEngAcronym, displayName = name)', () => {
+  it('homeTeam → teamA (LCK 도메인 표준 — code = LckTeamCode, displayName = 도메인 표준)', () => {
     expect(matches[0]?.teamA.code).toBe('DNS');
     expect(matches[0]?.teamA.displayName).toBe('DN 수퍼스');
   });
@@ -56,136 +91,71 @@ describe('Match.from — LCK sample', () => {
   });
 });
 
-describe('Match.from — status enum 매핑', () => {
-  const baseRaw: NaverMatch = {
-    gameId: 'g1',
-    topLeagueId: 'lck',
-    leagueId: 'lck_2026',
-    title: '정규시즌 1R',
-    startDate: 1777622400000,
-    maxMatchCount: 3,
-    matchStatus: 'BEFORE',
-    homeTeam: { name: 'T1', nameEngAcronym: 'T1' },
-    awayTeam: { name: '젠지', nameEngAcronym: 'GEN' },
-  };
-
+describe('toMatch — status enum 매핑', () => {
   it('BEFORE → scheduled', () => {
-    expect(Match.from({ ...baseRaw, matchStatus: 'BEFORE' })?.status).toBe('scheduled');
+    expect(toMatch(makeRaw({ matchStatus: 'BEFORE' }))?.status).toBe('scheduled');
   });
 
   it('RESULT → completed', () => {
-    expect(Match.from({ ...baseRaw, matchStatus: 'RESULT' })?.status).toBe('completed');
+    expect(toMatch(makeRaw({ matchStatus: 'RESULT' }))?.status).toBe('completed');
   });
 
   it('CANCEL → canceled', () => {
-    expect(Match.from({ ...baseRaw, matchStatus: 'CANCEL' })?.status).toBe('canceled');
+    expect(toMatch(makeRaw({ matchStatus: 'CANCEL' }))?.status).toBe('canceled');
   });
 
   it('알려지지 않은 상태(DELAYED 등) → scheduled (안전 기본값)', () => {
-    expect(
-      // @ts-expect-error — 타입상 알려진 3값만 허용. 런타임 fallback(normalizeStatus default) 검증.
-      Match.from({ ...baseRaw, matchStatus: 'DELAYED' })?.status,
-    ).toBe('scheduled');
+    expect(toMatch(makeRaw({ matchStatus: 'DELAYED' }))?.status).toBe('scheduled');
   });
 });
 
-describe('Match.from — maxMatchCount (1/3/5 통과, 그 외 throw)', () => {
-  // count: number로 열어두고 cast 내장 — 테스트에서 계약 위반 시나리오(2,7) 검증 위해 의도된 escape hatch.
-  function makeRaw(count: number): NaverMatch {
-    return {
-      gameId: 'g1',
-      topLeagueId: 'lck',
-      leagueId: 'lck_2026',
-      title: '결승',
-      startDate: 1777622400000,
-      maxMatchCount: count as NaverMatch['maxMatchCount'],
-      matchStatus: 'BEFORE',
-      homeTeam: { name: 'T1', nameEngAcronym: 'T1' },
-      awayTeam: { name: '젠지', nameEngAcronym: 'GEN' },
-    };
-  }
-
+describe('toMatch — maxMatchCount (1/3/5 통과, 그 외 throw)', () => {
   it('Bo1 → 통과', () => {
-    expect(Match.from(makeRaw(1))).not.toBeNull();
+    expect(toMatch(makeRaw({ maxMatchCount: 1 }))).not.toBeNull();
   });
   it('Bo3 → 통과', () => {
-    expect(Match.from(makeRaw(3))).not.toBeNull();
+    expect(toMatch(makeRaw({ maxMatchCount: 3 }))).not.toBeNull();
   });
   it('Bo5 → 통과', () => {
-    expect(Match.from(makeRaw(5))).not.toBeNull();
+    expect(toMatch(makeRaw({ maxMatchCount: 5 }))).not.toBeNull();
   });
-  it('Bo2 → throw (Naver 계약 위반)', () => {
-    expect(() => Match.from(makeRaw(2))).toThrow(/Naver 계약 위반/);
+  it('Bo2 → throw (BestOf 계약 위반)', () => {
+    expect(() => toMatch(makeRaw({ maxMatchCount: 2 }))).toThrow(/bestOf 계약 위반/);
   });
-  it('Bo7 → throw (Naver 계약 위반)', () => {
-    expect(() => Match.from(makeRaw(7))).toThrow(/Naver 계약 위반/);
+  it('Bo7 → throw (BestOf 계약 위반)', () => {
+    expect(() => toMatch(makeRaw({ maxMatchCount: 7 }))).toThrow(/bestOf 계약 위반/);
   });
 });
 
-describe('Match.from — TBD/팀 누락 안전 처리', () => {
-  function makeRaw(home: NaverMatch['homeTeam'], away: NaverMatch['awayTeam']): NaverMatch {
-    return {
-      gameId: 'g1',
-      topLeagueId: 'lck',
-      leagueId: 'lck_2026',
-      title: '결승',
-      startDate: 1777622400000,
-      maxMatchCount: 5,
-      matchStatus: 'BEFORE',
-      homeTeam: home,
-      awayTeam: away,
-    };
-  }
-
+describe('toMatch — TBD/팀 누락 안전 처리 (silent skip)', () => {
   it('homeTeam null → null', () => {
-    expect(Match.from(makeRaw(null, { name: '젠지', nameEngAcronym: 'GEN' }))).toBeNull();
+    expect(toMatch(makeRaw({ homeTeam: null }))).toBeNull();
   });
   it('awayTeam null → null', () => {
-    expect(Match.from(makeRaw({ name: 'T1', nameEngAcronym: 'T1' }, null))).toBeNull();
+    expect(toMatch(makeRaw({ awayTeam: null }))).toBeNull();
   });
   it('nameEngAcronym 비어있으면 null', () => {
-    expect(
-      Match.from(
-        makeRaw({ name: 'T1', nameEngAcronym: '' }, { name: '젠지', nameEngAcronym: 'GEN' }),
-      ),
-    ).toBeNull();
+    expect(toMatch(makeRaw({ homeTeam: { name: 'T1', nameEngAcronym: '' } }))).toBeNull();
   });
   it('name(한국어) 비어있으면 null', () => {
-    expect(
-      Match.from(
-        makeRaw({ name: '', nameEngAcronym: 'T1' }, { name: '젠지', nameEngAcronym: 'GEN' }),
-      ),
-    ).toBeNull();
+    expect(toMatch(makeRaw({ homeTeam: { name: '', nameEngAcronym: 'T1' } }))).toBeNull();
   });
 });
 
-describe('Match.from — alien topLeagueId (LEAGUES 미등록)', () => {
-  const baseRaw: NaverMatch = {
-    gameId: 'g1',
-    topLeagueId: 'unknown_xyz',
-    leagueId: 'whatever',
-    title: '1주 차',
-    startDate: 1777622400000,
-    maxMatchCount: 3,
-    matchStatus: 'BEFORE',
-    homeTeam: { name: 'T1', nameEngAcronym: 'T1' },
-    awayTeam: { name: '젠지', nameEngAcronym: 'GEN' },
-  };
-
-  it('LEAGUES에 없는 topLeagueId → null (silent skip)', () => {
-    expect(Match.from(baseRaw)).toBeNull();
+describe('toMatch — alien topLeagueId (도메인 미등록)', () => {
+  it('NAVER_TO_LEAGUE에 없는 topLeagueId → null (silent skip)', () => {
+    expect(toMatch(makeRaw({ topLeagueId: 'unknown_xyz' }))).toBeNull();
   });
 
   it('빈 문자열 topLeagueId → null', () => {
-    expect(Match.from({ ...baseRaw, topLeagueId: '' })).toBeNull();
+    expect(toMatch(makeRaw({ topLeagueId: '' }))).toBeNull();
   });
 });
 
-describe('envelope unwrap — 빈 응답 안전 처리', () => {
-  it('content가 null이면 빈 배열', () => {
-    const response = { code: 200, message: null, content: null } as NaverScheduleResponse;
-    const matches = Match.fromList(response.content?.matches ?? []);
-    expect(matches).toEqual([]);
+describe('toMatches — envelope unwrap 빈 응답 안전 처리', () => {
+  it('content가 null인 경우(상위 호출자 통과 패턴) → 빈 배열', () => {
+    const response: NaverEnvelope = { content: null };
+    expect(toMatches(response.content?.matches ?? [])).toEqual([]);
   });
 
   it('invalid topLeagueId (matches=[]) → 빈 배열', () => {
@@ -193,52 +163,92 @@ describe('envelope unwrap — 빈 응답 안전 처리', () => {
   });
 });
 
-describe('Match.fromList — 6 대회 fixture smoke test (DTO 안정성)', () => {
+describe('toMatches — 6 대회 fixture smoke (DTO 안정성 + 도메인 League 매핑)', () => {
   const cases: ReadonlyArray<readonly [string, string, number]> = [
     ['naver-lck-sample.json', 'LCK', 4],
     ['naver-msi-sample.json', 'MSI', 3],
-    ['naver-worlds-sample.json', '월드 챔피언십', 3],
-    ['naver-first-stand-sample.json', 'First Stand', 3],
+    ['naver-worlds-sample.json', 'WORLDS', 3],
+    ['naver-first-stand-sample.json', 'FIRST_STAND', 3],
     ['naver-ewc-sample.json', 'EWC', 3],
-    ['naver-kespa-sample.json', 'KeSPA Cup', 3],
+    ['naver-kespa-sample.json', 'KESPA_CUP', 3],
   ];
 
-  it.each(cases)('%s → %s display, %i 매치', (file, display, expected) => {
+  it.each(cases)('%s → League %s, %i 매치', (file, league, expected) => {
     const matches = parseFixture(file);
     expect(matches).toHaveLength(expected);
-    expect(matches.every((m) => m.tournament.displayName === display)).toBe(true);
+    expect(matches.every((m) => m.league === league)).toBe(true);
     expect(matches.every((m) => m.id.startsWith('naver:'))).toBe(true);
+  });
+
+  it('display 이름은 LEAGUE_DISPLAY_NAME으로 lookup (도메인 표준)', () => {
+    expect(LEAGUE_DISPLAY_NAME.LCK).toBe('LCK');
+    expect(LEAGUE_DISPLAY_NAME.WORLDS).toBe('월드 챔피언십');
+    expect(LEAGUE_DISPLAY_NAME.FIRST_STAND).toBe('First Stand');
+    expect(LEAGUE_DISPLAY_NAME.KESPA_CUP).toBe('KeSPA Cup');
+  });
+});
+
+describe('toMatch — LCK 팀 displayName 도메인 표준 (Naver 표기 변화 흔들림 X)', () => {
+  it('Naver name이 "Gen.G Esports"여도 LCK 표준 "젠지"로 override', () => {
+    const m = toMatch(
+      makeRaw({
+        homeTeam: { name: 'Gen.G Esports', nameEngAcronym: 'GEN' },
+      }),
+    );
+    expect(m?.teamA.displayName).toBe('젠지');
+    expect(m?.teamA.code).toBe('GEN');
+  });
+
+  it('KRX → DRX (2026 키움증권 후원 — code/display 분리)', () => {
+    const m = toMatch(
+      makeRaw({
+        homeTeam: { name: '아무거나', nameEngAcronym: 'KRX' },
+      }),
+    );
+    expect(m?.teamA.code).toBe('KRX');
+    expect(m?.teamA.displayName).toBe('DRX');
+  });
+
+  it('Naver acronym이 소문자/공백 섞여 있어도 정규화 후 LCK 표준 적용', () => {
+    const m = toMatch(
+      makeRaw({
+        homeTeam: { name: 'whatever', nameEngAcronym: '  t1  ' },
+      }),
+    );
+    expect(m?.teamA.code).toBe('T1');
+    expect(m?.teamA.displayName).toBe('T1');
+  });
+
+  it('International 팀(LCK 외)은 Naver 값 그대로 (열린 집합)', () => {
+    const m = toMatch(
+      makeRaw({
+        topLeagueId: 'msi',
+        homeTeam: { name: 'G2 Esports', nameEngAcronym: 'G2' },
+      }),
+    );
+    expect(m?.teamA.code).toBe('G2');
+    expect(m?.teamA.displayName).toBe('G2 Esports');
   });
 });
 
 describe('Match 도메인 술어 + inline filter', () => {
-  const STATUS_TO_NAVER = {
-    scheduled: 'BEFORE',
-    completed: 'RESULT',
-    canceled: 'CANCEL',
-  } as const;
-
   function makeMatch(opts: {
     id: string;
     teamA: { code: string; name: string };
     teamB: { code: string; name: string };
     startsAt: string;
-    status: keyof typeof STATUS_TO_NAVER;
+    status: 'scheduled' | 'completed' | 'canceled';
   }): Match {
-    const raw: NaverMatch = {
-      gameId: opts.id,
-      topLeagueId: 'lck',
-      leagueId: 'lck_2026',
-      title: '1주 차',
-      startDate: new Date(opts.startsAt).getTime(),
-      maxMatchCount: 3,
-      matchStatus: STATUS_TO_NAVER[opts.status],
-      homeTeam: { name: opts.teamA.name, nameEngAcronym: opts.teamA.code },
-      awayTeam: { name: opts.teamB.name, nameEngAcronym: opts.teamB.code },
-    };
-    const m = Match.from(raw);
-    if (!m) throw new Error('Match.from returned null');
-    return m;
+    return Match.create({
+      id: `naver:${opts.id}`,
+      league: 'LCK',
+      stage: '1주 차',
+      teamA: { code: opts.teamA.code, displayName: opts.teamA.name },
+      teamB: { code: opts.teamB.code, displayName: opts.teamB.name },
+      startsAt: opts.startsAt,
+      bestOf: 3,
+      status: opts.status,
+    });
   }
 
   const matches = [
@@ -246,28 +256,28 @@ describe('Match 도메인 술어 + inline filter', () => {
       id: 'm1',
       teamA: { code: 'T1', name: 'T1' },
       teamB: { code: 'GEN', name: '젠지' },
-      startsAt: '2026-05-15T10:00:00Z',
+      startsAt: '2026-05-15T10:00:00.000Z',
       status: 'scheduled',
     }),
     makeMatch({
       id: 'm2',
       teamA: { code: 'HLE', name: '한화생명' },
-      teamB: { code: 'DRX', name: 'DRX' },
-      startsAt: '2026-05-16T10:00:00Z',
+      teamB: { code: 'KRX', name: 'DRX' },
+      startsAt: '2026-05-16T10:00:00.000Z',
       status: 'scheduled',
     }),
     makeMatch({
       id: 'm3',
       teamA: { code: 'GEN', name: '젠지' },
       teamB: { code: 'T1', name: 'T1' },
-      startsAt: '2026-05-10T10:00:00Z',
+      startsAt: '2026-05-10T10:00:00.000Z',
       status: 'canceled',
     }),
     makeMatch({
       id: 'm4',
       teamA: { code: 'T1', name: 'T1' },
       teamB: { code: 'KT', name: 'KT' },
-      startsAt: '2026-05-12T10:00:00Z',
+      startsAt: '2026-05-12T10:00:00.000Z',
       status: 'completed',
     }),
   ];
@@ -303,5 +313,24 @@ describe('Match 도메인 술어 + inline filter', () => {
     const before = matches.map((m) => m.id);
     matches.filter((m) => m.involves('T1') && m.isActive);
     expect(matches.map((m) => m.id)).toEqual(before);
+  });
+
+  it('matchup: "teamA.displayName vs teamB.displayName"', () => {
+    expect(matches[0]!.matchup).toBe('T1 vs 젠지');
+  });
+
+  it('tournamentLabel: stage 있으면 "<display> <stage>", 없으면 display만', () => {
+    expect(matches[0]!.tournamentLabel).toBe('LCK 1주 차');
+    const noStage = Match.create({
+      id: 'naver:x',
+      league: 'WORLDS',
+      stage: '',
+      teamA: { code: 'T1', displayName: 'T1' },
+      teamB: { code: 'GEN', displayName: '젠지' },
+      startsAt: '2026-10-01T10:00:00.000Z',
+      bestOf: 5,
+      status: 'scheduled',
+    });
+    expect(noStage.tournamentLabel).toBe('월드 챔피언십');
   });
 });

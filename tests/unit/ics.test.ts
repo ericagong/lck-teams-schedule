@@ -1,44 +1,36 @@
 import { describe, expect, it } from 'vitest';
 import { Match } from '../../src/match.js';
-import type { NaverMatch } from '../../src/naver.js';
+import type { League } from '../../src/league.js';
 import { generateIcs, IcsEvent } from '../../src/ics.js';
 
 const FIXED_NOW = new Date('2026-05-12T03:00:00Z');
-
-const STATUS_TO_NAVER = {
-  scheduled: 'BEFORE',
-  completed: 'RESULT',
-  canceled: 'CANCEL',
-} as const;
 
 function makeMatch(
   overrides: {
     id?: string;
     stage?: string;
-    leagueDisplayName?: string;
+    league?: League;
     teamA?: { code: string; name: string };
     teamB?: { code: string; name: string };
     startsAt?: string;
     bestOf?: 1 | 3 | 5;
-    status?: keyof typeof STATUS_TO_NAVER;
+    status?: 'scheduled' | 'completed' | 'canceled';
   } = {},
 ): Match {
-  const raw: NaverMatch = {
-    gameId: overrides.id ?? '115548128962840643',
-    topLeagueId: 'lck',
-    leagueId: 'lck_2026',
-    title: overrides.stage ?? '2주 차',
-    startDate: new Date(overrides.startsAt ?? '2026-04-08T10:00:00Z').getTime(),
-    maxMatchCount: overrides.bestOf ?? 3,
-    matchStatus: STATUS_TO_NAVER[overrides.status ?? 'completed'],
-    homeTeam: overrides.teamA
-      ? { name: overrides.teamA.name, nameEngAcronym: overrides.teamA.code }
-      : { name: 'T1', nameEngAcronym: 'T1' },
-    awayTeam: overrides.teamB
-      ? { name: overrides.teamB.name, nameEngAcronym: overrides.teamB.code }
-      : { name: '젠지', nameEngAcronym: 'GEN' },
-  };
-  return new Match(raw, overrides.leagueDisplayName ?? 'LCK');
+  return Match.create({
+    id: `naver:${overrides.id ?? '115548128962840643'}`,
+    league: overrides.league ?? 'LCK',
+    stage: overrides.stage ?? '2주 차',
+    teamA: overrides.teamA
+      ? { code: overrides.teamA.code, displayName: overrides.teamA.name }
+      : { code: 'T1', displayName: 'T1' },
+    teamB: overrides.teamB
+      ? { code: overrides.teamB.code, displayName: overrides.teamB.name }
+      : { code: 'GEN', displayName: '젠지' },
+    startsAt: overrides.startsAt ?? '2026-04-08T10:00:00.000Z',
+    bestOf: overrides.bestOf ?? 3,
+    status: overrides.status ?? 'completed',
+  });
 }
 
 const sampleMatch = makeMatch();
@@ -169,7 +161,7 @@ describe('generateIcs', () => {
   // 한국어 1글자 = UTF-8 3바이트. 75바이트 경계에서 문자 중간 깨지면 ICS 손상.
   describe('RFC 5545 line folding', () => {
     const longKoreanMatch = makeMatch({
-      leagueDisplayName: '리그 오브 레전드 챔피언스 코리아',
+      league: 'WORLDS',
       stage: '플레이오프 라운드 1 매치 1',
       bestOf: 5,
     });
@@ -192,7 +184,7 @@ describe('generateIcs', () => {
       expect(ics).not.toContain('�');
       const unfolded = ics.replace(/\r\n /g, '');
       expect(unfolded).toContain(
-        'SUMMARY:T1 vs 젠지 — 리그 오브 레전드 챔피언스 코리아 플레이오프 라운드 1 매치 1 (Bo5)',
+        'SUMMARY:T1 vs 젠지 — 월드 챔피언십 플레이오프 라운드 1 매치 1 (Bo5)',
       );
     });
 

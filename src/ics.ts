@@ -3,6 +3,7 @@
  */
 
 import type { BestOf, Match } from './match.js';
+import { LEAGUE_DISPLAY_NAME } from './league.js';
 
 export type IcsOptions = {
   readonly calendarName: string;
@@ -148,7 +149,7 @@ export class IcsEvent {
     this.summary = `${match.matchup} — ${match.tournamentLabel} (Bo${match.bestOf})`;
     this.description = [
       match.matchup,
-      `${match.tournament.displayName} — ${match.tournament.stage}`,
+      `${LEAGUE_DISPLAY_NAME[match.league]} — ${match.stage}`,
       `Best of ${match.bestOf}`,
       '',
       `중계: ${STREAM_URL}`,

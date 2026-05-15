@@ -42,5 +42,8 @@
     "*.{json,md,yml,yaml}": [
       "prettier --write"
     ]
+  },
+  "dependencies": {
+    "zod": "^4.4.3"
   }
 }

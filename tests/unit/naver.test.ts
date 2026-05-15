@@ -1,16 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { SCHEDULE_WINDOW, getScheduleMonths } from '../../src/naver.js';
-import { LEAGUES } from '../../src/match.js';
+import { getScheduleMonths } from '../../src/naver.js';
+import { ALL_LEAGUES, LEAGUE_DISPLAY_NAME } from '../../src/league.js';
 
-describe('SCHEDULE_WINDOW — Phase 3 5차 결정', () => {
-  it('monthsBefore=3, monthsAhead=1 (5 month rolling)', () => {
-    expect(SCHEDULE_WINDOW.monthsBefore).toBe(3);
-    expect(SCHEDULE_WINDOW.monthsAhead).toBe(1);
-  });
-});
-
-describe('getScheduleMonths — rolling 5 month window', () => {
-  it('항상 5개월 반환 (monthsBefore + 1 + monthsAhead)', () => {
+describe('getScheduleMonths — rolling 5 month window (과거 3 + 현재 + 미래 1)', () => {
+  it('항상 5개월 반환', () => {
     expect(getScheduleMonths(new Date(Date.UTC(2026, 4, 13)))).toHaveLength(5);
   });
 
@@ -51,16 +44,16 @@ describe('getScheduleMonths — rolling 5 month window', () => {
   });
 });
 
-describe('LEAGUES — 6 대회', () => {
-  it('6 raw id 정확', () => {
-    expect(Object.keys(LEAGUES).sort()).toEqual(
-      ['ewc_lol', 'first_stand_lol', 'lck', 'lol_kespa', 'msi', 'world_championship'].sort(),
+describe('ALL_LEAGUES — 6 대회 도메인 식별자', () => {
+  it('정확히 6개 — LCK, MSI, WORLDS, FIRST_STAND, EWC, KESPA_CUP', () => {
+    expect([...ALL_LEAGUES].sort()).toEqual(
+      ['EWC', 'FIRST_STAND', 'KESPA_CUP', 'LCK', 'MSI', 'WORLDS'].sort(),
     );
   });
 
-  it('모든 displayName 비어있지 않음', () => {
-    for (const name of Object.values(LEAGUES)) {
-      expect(name.length).toBeGreaterThan(0);
+  it('모든 League에 표시명이 정의됨 (비어있지 않음)', () => {
+    for (const league of ALL_LEAGUES) {
+      expect(LEAGUE_DISPLAY_NAME[league].length).toBeGreaterThan(0);
     }
   });
 });
