@@ -102,7 +102,6 @@ function formatKstCompact(utcDate: Date): string {
 
 function buildCalendarHeader(options: IcsOptions): string[] {
   return [
-    'BEGIN:VCALENDAR',
     'VERSION:2.0',
     `PRODID:${PRODID}`,
     'CALSCALE:GREGORIAN',
@@ -186,6 +185,7 @@ export function generateIcs(matches: readonly Match[], options: IcsOptions): str
 
   return (
     [
+      'BEGIN:VCALENDAR',
       ...buildCalendarHeader(options),
       ...buildVTimezoneBlock(),
       ...sorted.flatMap((m) => new IcsEvent(m, now).toLines()),
