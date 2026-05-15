@@ -11,7 +11,7 @@ import type { Team } from './team.js';
 export type BestOf = 1 | 3 | 5;
 export type MatchStatus = 'scheduled' | 'completed' | 'canceled';
 
-export type MatchProps = {
+type MatchProps = {
   readonly id: string;
   readonly league: League;
   readonly stage: string;

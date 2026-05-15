@@ -5,7 +5,7 @@
 import type { BestOf, Match } from './match.js';
 import { LEAGUE_DISPLAY_NAME } from './league.js';
 
-export type IcsOptions = {
+type IcsOptions = {
   readonly calendarName: string;
   /** DTSTAMP용. 테스트 주입. 미지정 시 new Date(). */
   readonly now?: Date;
