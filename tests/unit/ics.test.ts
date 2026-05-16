@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { Match } from '../../src/match.js';
 import type { League } from '../../src/league.js';
-import { generateIcs, IcsEvent } from '../../src/ics.js';
+import { generateIcs } from '../../src/ics.js';
 
 const FIXED_NOW = new Date('2026-05-12T03:00:00Z');
 
@@ -42,12 +42,11 @@ describe('generateIcs', () => {
     expect(ics).toMatch(/END:VCALENDAR\r\n$/);
   });
 
-  it('VTIMEZONE Asia/Seoul 블록을 포함한다', () => {
+  it('VTIMEZONE 블록을 포함하지 않는다 (UTC 시각 사용 → 캘린더 앱이 자동 변환)', () => {
     const ics = generateIcs([sampleMatch], { calendarName: 'T1', now: FIXED_NOW });
-    expect(ics).toContain('BEGIN:VTIMEZONE');
-    expect(ics).toContain('TZID:Asia/Seoul');
-    expect(ics).toContain('TZOFFSETTO:+0900');
-    expect(ics).toContain('END:VTIMEZONE');
+    expect(ics).not.toContain('BEGIN:VTIMEZONE');
+    expect(ics).not.toContain('TZID:');
+    expect(ics).not.toContain('X-WR-TIMEZONE:');
   });
 
   it('UID는 match.id 기반 (naver: 접두 + @lck-schedule-sync)', () => {
@@ -55,20 +54,20 @@ describe('generateIcs', () => {
     expect(ics).toContain('UID:naver:115548128962840643@lck-schedule-sync');
   });
 
-  it('DTSTART를 KST로 변환한다 (UTC 10:00 → KST 19:00)', () => {
+  it('DTSTART는 UTC compact 형식 (입력 UTC 10:00 → 20260408T100000Z)', () => {
     const ics = generateIcs([sampleMatch], { calendarName: 'T1', now: FIXED_NOW });
-    expect(ics).toContain('DTSTART;TZID=Asia/Seoul:20260408T190000');
+    expect(ics).toContain('DTSTART:20260408T100000Z');
   });
 
-  it('DTEND는 Bo3 기준 +3h (KST 19:00 → 22:00)', () => {
+  it('DTEND는 Bo3 기준 +3h (UTC 10:00 → 13:00)', () => {
     const ics = generateIcs([sampleMatch], { calendarName: 'T1', now: FIXED_NOW });
-    expect(ics).toContain('DTEND;TZID=Asia/Seoul:20260408T220000');
+    expect(ics).toContain('DTEND:20260408T130000Z');
   });
 
-  it('Bo5는 +4.5h', () => {
+  it('Bo5는 +4.5h (UTC 10:00 → 14:30)', () => {
     const bo5 = makeMatch({ bestOf: 5, startsAt: '2026-04-08T10:00:00Z' });
     const ics = generateIcs([bo5], { calendarName: 'T1', now: FIXED_NOW });
-    expect(ics).toContain('DTEND;TZID=Asia/Seoul:20260408T233000');
+    expect(ics).toContain('DTEND:20260408T143000Z');
   });
 
   it('SUMMARY에 한국어 팀명을 포함한다', () => {
@@ -195,32 +194,21 @@ describe('generateIcs', () => {
   });
 });
 
-describe('IcsEvent (변환 가시성 응집)', () => {
-  it('constructor 한 곳에서 Match → ICS 필드 모두 채워진다', () => {
-    const event = new IcsEvent(sampleMatch, FIXED_NOW);
-    expect(event.uid).toBe('naver:115548128962840643@lck-schedule-sync');
-    expect(event.dtstamp).toBe('20260512T030000Z');
-    expect(event.dtstart).toBe('20260408T190000');
-    expect(event.dtend).toBe('20260408T220000');
-    expect(event.summary).toBe('T1 vs 젠지 — LCK 2주 차 (Bo3)');
-    expect(event.status).toBe('CONFIRMED');
+describe('VEVENT 블록 구조', () => {
+  it('BEGIN:VEVENT … END:VEVENT로 감싼다', () => {
+    const ics = generateIcs([sampleMatch], { calendarName: 'T1', now: FIXED_NOW });
+    expect(ics).toContain('BEGIN:VEVENT');
+    expect(ics).toContain('END:VEVENT');
   });
 
-  it('static from으로도 동일 결과', () => {
-    const a = new IcsEvent(sampleMatch, FIXED_NOW);
-    const b = IcsEvent.from(sampleMatch, FIXED_NOW);
-    expect(a.toLines()).toEqual(b.toLines());
-  });
-
-  it('canceled 매치는 status CANCELLED', () => {
-    const canceled = makeMatch({ status: 'canceled' });
-    const event = new IcsEvent(canceled, FIXED_NOW);
-    expect(event.status).toBe('CANCELLED');
-  });
-
-  it('toLines는 BEGIN:VEVENT … END:VEVENT 블록을 반환한다', () => {
-    const lines = new IcsEvent(sampleMatch, FIXED_NOW).toLines();
-    expect(lines[0]).toBe('BEGIN:VEVENT');
-    expect(lines[lines.length - 1]).toBe('END:VEVENT');
+  it('필수 필드를 모두 포함한다 (UID, DTSTAMP, DTSTART, DTEND, SUMMARY, STATUS, URL)', () => {
+    const ics = generateIcs([sampleMatch], { calendarName: 'T1', now: FIXED_NOW });
+    expect(ics).toContain('UID:naver:115548128962840643@lck-schedule-sync');
+    expect(ics).toContain('DTSTAMP:20260512T030000Z');
+    expect(ics).toContain('DTSTART:20260408T100000Z');
+    expect(ics).toContain('DTEND:20260408T130000Z');
+    expect(ics).toContain('SUMMARY:T1 vs 젠지 — LCK 2주 차 (Bo3)');
+    expect(ics).toContain('STATUS:CONFIRMED');
+    expect(ics).toContain('URL:https://lolesports.com/');
   });
 });

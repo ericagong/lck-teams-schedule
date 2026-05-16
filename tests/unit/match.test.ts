@@ -334,3 +334,70 @@ describe('Match 도메인 술어 + inline filter', () => {
     expect(noStage.tournamentLabel).toBe('월드 챔피언십');
   });
 });
+
+describe('Match — ICS 출력 표현 (도메인 응집)', () => {
+  function makeMatch(
+    overrides: {
+      bestOf?: 1 | 3 | 5;
+      stage?: string;
+      league?: 'LCK' | 'WORLDS';
+      startsAt?: string;
+    } = {},
+  ): Match {
+    return Match.create({
+      id: 'naver:x',
+      league: overrides.league ?? 'LCK',
+      stage: overrides.stage ?? '1주 차',
+      teamA: { code: 'T1', displayName: 'T1' },
+      teamB: { code: 'GEN', displayName: '젠지' },
+      startsAt: overrides.startsAt ?? '2026-05-15T10:00:00.000Z',
+      bestOf: overrides.bestOf ?? 3,
+      status: 'scheduled',
+    });
+  }
+
+  describe('endDate: startDate + Bo별 평균 길이', () => {
+    it('Bo1 → +1h', () => {
+      expect(makeMatch({ bestOf: 1 }).endDate.toISOString()).toBe('2026-05-15T11:00:00.000Z');
+    });
+    it('Bo3 → +3h', () => {
+      expect(makeMatch({ bestOf: 3 }).endDate.toISOString()).toBe('2026-05-15T13:00:00.000Z');
+    });
+    it('Bo5 → +4.5h', () => {
+      expect(makeMatch({ bestOf: 5 }).endDate.toISOString()).toBe('2026-05-15T14:30:00.000Z');
+    });
+  });
+
+  describe('summary: "matchup — tournamentLabel (BoN)"', () => {
+    it('정규시즌 Bo3', () => {
+      expect(makeMatch().summary).toBe('T1 vs 젠지 — LCK 1주 차 (Bo3)');
+    });
+    it('결승 Bo5', () => {
+      expect(makeMatch({ stage: '결승', bestOf: 5 }).summary).toBe('T1 vs 젠지 — LCK 결승 (Bo5)');
+    });
+    it('stage 없을 때 display명만', () => {
+      expect(makeMatch({ league: 'WORLDS', stage: '', bestOf: 5 }).summary).toBe(
+        'T1 vs 젠지 — 월드 챔피언십 (Bo5)',
+      );
+    });
+  });
+
+  describe('description: 매치업·대회·BoN·중계 4줄 본문', () => {
+    it('형식 확인', () => {
+      const desc = makeMatch().description;
+      expect(desc).toBe(
+        ['T1 vs 젠지', 'LCK — 1주 차', 'Best of 3', '', '중계: https://lolesports.com/'].join('\n'),
+      );
+    });
+
+    it('월드 결승 Bo5', () => {
+      const desc = makeMatch({ league: 'WORLDS', stage: '결승', bestOf: 5 }).description;
+      expect(desc).toContain('월드 챔피언십 — 결승');
+      expect(desc).toContain('Best of 5');
+    });
+  });
+
+  it('streamUrl: lolesports 단일화', () => {
+    expect(makeMatch().streamUrl).toBe('https://lolesports.com/');
+  });
+});
