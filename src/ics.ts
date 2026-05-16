@@ -1,9 +1,11 @@
 /**
- * Match → IcsEvent → ICS 문자열 (RFC 5545).
+ * Match → ICS string (RFC 5545).
+ *
+ * 시간은 UTC compact (`Z` suffix)로 출력 → 캘린더 앱이 사용자 로컬 timezone으로
+ * 자동 변환. 별도 VTIMEZONE 블록·TZID 처리 불필요.
  */
 
-import type { BestOf, Match } from './match.js';
-import { LEAGUE_DISPLAY_NAME } from './league.js';
+import type { Match } from './match.js';
 
 type IcsOptions = {
   readonly calendarName: string;
@@ -11,16 +13,7 @@ type IcsOptions = {
   readonly now?: Date;
 };
 
-const TZID = 'Asia/Seoul';
 const PRODID = '-//lck-schedule-sync//T1//KO';
-const STREAM_URL = 'https://lolesports.com/';
-
-/** 실측 평균 (Bo1 30~50분, Bo3 2~3h, Bo5 3.5~5h). */
-const ESTIMATED_HOURS_BY_BEST_OF: Readonly<Record<BestOf, number>> = {
-  1: 1,
-  3: 3,
-  5: 4.5,
-};
 
 /**
  * ⚠️ 백슬래시를 가장 먼저. 다른 escape가 만든 `\\`가 다시 escape되면 출력이 깨짐.
@@ -65,39 +58,12 @@ function foldLine(line: string): string {
   return chunks.map((c, i) => (i === 0 ? c : ' ' + c)).join('\r\n');
 }
 
-/**
- * Asia/Seoul은 DST 없어 +9 고정 → UTC 시각에 +9h 더한 뒤 getUTC*로 KST 값 읽기.
- */
-function toKstParts(utcDate: Date): {
-  y: string;
-  mo: string;
-  d: string;
-  h: string;
-  mi: string;
-  s: string;
-} {
-  const KST_OFFSET_MS = 9 * 60 * 60 * 1000;
-  const shifted = new Date(utcDate.getTime() + KST_OFFSET_MS);
-  return {
-    y: String(shifted.getUTCFullYear()),
-    mo: String(shifted.getUTCMonth() + 1).padStart(2, '0'),
-    d: String(shifted.getUTCDate()).padStart(2, '0'),
-    h: String(shifted.getUTCHours()).padStart(2, '0'),
-    mi: String(shifted.getUTCMinutes()).padStart(2, '0'),
-    s: String(shifted.getUTCSeconds()).padStart(2, '0'),
-  };
-}
-
+/** YYYYMMDDTHHMMSSZ — RFC 5545 UTC compact 표현. */
 function formatUtcCompact(date: Date): string {
   return date
     .toISOString()
     .replace(/[-:]/g, '')
     .replace(/\.\d{3}/, '');
-}
-
-function formatKstCompact(utcDate: Date): string {
-  const { y, mo, d, h, mi, s } = toKstParts(utcDate);
-  return `${y}${mo}${d}T${h}${mi}${s}`;
 }
 
 function buildCalendarHeader(options: IcsOptions): string[] {
@@ -107,73 +73,22 @@ function buildCalendarHeader(options: IcsOptions): string[] {
     'CALSCALE:GREGORIAN',
     'METHOD:PUBLISH',
     `X-WR-CALNAME:${escapeText(options.calendarName)}`,
-    `X-WR-TIMEZONE:${TZID}`,
   ];
 }
 
-function buildVTimezoneBlock(): string[] {
+function matchToVeventLines(match: Match, now: Date): string[] {
   return [
-    'BEGIN:VTIMEZONE',
-    `TZID:${TZID}`,
-    'BEGIN:STANDARD',
-    'DTSTART:19700101T000000',
-    'TZOFFSETFROM:+0900',
-    'TZOFFSETTO:+0900',
-    'TZNAME:KST',
-    'END:STANDARD',
-    'END:VTIMEZONE',
+    'BEGIN:VEVENT',
+    `UID:${match.id}@lck-schedule-sync`,
+    `DTSTAMP:${formatUtcCompact(now)}`,
+    `DTSTART:${formatUtcCompact(match.startDate)}`,
+    `DTEND:${formatUtcCompact(match.endDate)}`,
+    `SUMMARY:${escapeText(match.summary)}`,
+    `DESCRIPTION:${escapeText(match.description)}`,
+    `STATUS:${match.status === 'canceled' ? 'CANCELLED' : 'CONFIRMED'}`,
+    `URL:${match.streamUrl}`,
+    'END:VEVENT',
   ];
-}
-
-export class IcsEvent {
-  readonly uid: string;
-  readonly dtstamp: string;
-  readonly dtstart: string;
-  readonly dtend: string;
-  readonly summary: string;
-  readonly description: string;
-  readonly status: 'CONFIRMED' | 'CANCELLED';
-  readonly url: string = STREAM_URL;
-
-  constructor(match: Match, now: Date) {
-    const startUtc = match.startDate;
-    const endUtc = new Date(
-      startUtc.getTime() + ESTIMATED_HOURS_BY_BEST_OF[match.bestOf] * 3600 * 1000,
-    );
-
-    this.uid = `${match.id}@lck-schedule-sync`;
-    this.dtstamp = formatUtcCompact(now);
-    this.dtstart = formatKstCompact(startUtc);
-    this.dtend = formatKstCompact(endUtc);
-    this.summary = `${match.matchup} — ${match.tournamentLabel} (Bo${match.bestOf})`;
-    this.description = [
-      match.matchup,
-      `${LEAGUE_DISPLAY_NAME[match.league]} — ${match.stage}`,
-      `Best of ${match.bestOf}`,
-      '',
-      `중계: ${STREAM_URL}`,
-    ].join('\n');
-    this.status = match.status === 'canceled' ? 'CANCELLED' : 'CONFIRMED';
-  }
-
-  static from(match: Match, now: Date): IcsEvent {
-    return new IcsEvent(match, now);
-  }
-
-  toLines(): string[] {
-    return [
-      'BEGIN:VEVENT',
-      `UID:${this.uid}`,
-      `DTSTAMP:${this.dtstamp}`,
-      `DTSTART;TZID=${TZID}:${this.dtstart}`,
-      `DTEND;TZID=${TZID}:${this.dtend}`,
-      `SUMMARY:${escapeText(this.summary)}`,
-      `DESCRIPTION:${escapeText(this.description)}`,
-      `STATUS:${this.status}`,
-      `URL:${this.url}`,
-      'END:VEVENT',
-    ];
-  }
 }
 
 /**
@@ -187,8 +102,7 @@ export function generateIcs(matches: readonly Match[], options: IcsOptions): str
     [
       'BEGIN:VCALENDAR',
       ...buildCalendarHeader(options),
-      ...buildVTimezoneBlock(),
-      ...sorted.flatMap((m) => new IcsEvent(m, now).toLines()),
+      ...sorted.flatMap((m) => matchToVeventLines(m, now)),
       'END:VCALENDAR',
     ]
       .map(foldLine)
