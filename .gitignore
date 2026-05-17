@@ -20,3 +20,6 @@ fixtures/
 
 # main.ts가 작성하는 fallback 발동 marker (GitHub Actions가 같은 워크플로 안에서 읽음)
 .fetch-source
+
+# Claude Code 세션 캐시·worktree (개발 도구 임시 디렉터리)
+.claude/
