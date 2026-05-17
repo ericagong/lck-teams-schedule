@@ -84,6 +84,13 @@ const NaverMatchSchema = z.object({
   homeTeam: NaverTeamSchema.nullable(),
   awayTeam: NaverTeamSchema.nullable(),
   topLeagueId: z.string(),
+  // 매치 메타 (optional — 모든 매치에 있는 건 아님. 네이버는 누락 시 null 또는 0)
+  homeScore: z.number().int().nonnegative().nullable().optional(),
+  awayScore: z.number().int().nonnegative().nullable().optional(),
+  winner: z.enum(['HOME', 'AWAY']).nullable().optional(),
+  stadium: z.string().nullable().optional(),
+  chzzkChannelId: z.string().nullable().optional(),
+  replayVideoId: z.number().int().positive().nullable().optional(),
 });
 
 const NaverResponseSchema = z.object({
@@ -115,7 +122,22 @@ export function toMatch(raw: unknown): Match | null {
     startsAt: epochMsToIsoUtc(m.startDate),
     bestOf: m.maxMatchCount,
     status: toMatchStatus(m.matchStatus),
+    score: toScore(m),
+    // null → undefined 정규화 (도메인은 undefined만 다룸)
+    stadium: m.stadium ?? undefined,
+    chzzkChannelId: m.chzzkChannelId ?? undefined,
+    replayVideoId: m.replayVideoId ?? undefined,
   });
+}
+
+type NaverMatchWithScore = z.infer<typeof NaverMatchSchema>;
+
+/** 완료 매치에만 점수 가짐 — 셋 다 있어야 score 객체 반환. */
+function toScore(
+  m: NaverMatchWithScore,
+): { home: number; away: number; winner: 'HOME' | 'AWAY' } | undefined {
+  if (m.homeScore == null || m.awayScore == null || !m.winner) return undefined;
+  return { home: m.homeScore, away: m.awayScore, winner: m.winner };
 }
 
 export function toMatches(raws: readonly unknown[]): Match[] {

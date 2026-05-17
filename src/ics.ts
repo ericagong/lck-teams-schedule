@@ -80,18 +80,22 @@ function buildCalendarHeader(options: IcsOptions): string[] {
  * "업데이트됨"으로 인식하는 노이즈를 회피. UID 멱등성과 같은 결.
  */
 function matchToVeventLines(match: Match): string[] {
-  return [
+  const lines: string[] = [
     'BEGIN:VEVENT',
     `UID:${match.id}@lck-schedule-sync`,
     `DTSTAMP:${formatUtcCompact(match.startDate)}`,
     `DTSTART:${formatUtcCompact(match.startDate)}`,
     `DTEND:${formatUtcCompact(match.endDate)}`,
     `SUMMARY:${escapeText(match.summary)}`,
+  ];
+  if (match.location) lines.push(`LOCATION:${escapeText(match.location)}`);
+  lines.push(
     `DESCRIPTION:${escapeText(match.description)}`,
     `STATUS:${match.status === 'canceled' ? 'CANCELLED' : 'CONFIRMED'}`,
     `URL:${match.streamUrl}`,
     'END:VEVENT',
-  ];
+  );
+  return lines;
 }
 
 /**

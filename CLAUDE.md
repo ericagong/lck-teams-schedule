@@ -93,7 +93,7 @@ Phase 5 (선택): 운영 강화
 ```bash
 pnpm install
 pnpm dev          # public/{팀}.ics 10개 + index.html 생성
-pnpm test         # 106개 단위 테스트
+pnpm test         # 119개 단위 테스트
 pnpm typecheck
 pnpm check        # typecheck + lint + format + test 한 번에
 ```
@@ -144,7 +144,9 @@ pnpm check        # typecheck + lint + format + test 한 번에
 
 **사용**: `startTime` → DTSTART, `state` → STATUS, `type`(`match`만 통과), `blockName` → `tournament.stage`, `league.name` → `tournament.displayName`, `match.id` → UID(멱등성), `match.strategy.{type,count}` → `bestOf`, `match.teams[].{name,code}` → 팀 표시·필터.
 
-**미사용**: `league.slug` / `match.flags` / `match.teams[].image` (호환성 낮음), `match.teams[].record.{wins,losses}` + `result.{outcome,gameWins}` (⚠️ 스포일러 회피 — 이미 본 매치 다시 캘린더에서 봐도 결과 노출 안 됨).
+**미사용**: `league.slug` / `match.flags` / `match.teams[].image` (호환성 낮음), `match.teams[].record.{wins,losses}` (시즌 전적 표시는 미정 — 추가하면 다른 매치 결과 함의로 스포일러 위험).
+
+> 참고: lolesports 시절 `result.{outcome,gameWins}`도 스포일러 회피 목적으로 미사용. 네이버 전환 이후 Phase 4에서 **결정 폐기** — 점수·승자·다시보기 모두 DESCRIPTION에 포함 (DECISION_MAKING.md §4.7 참조).
 
 ### DTO 안정성
 
@@ -425,6 +427,34 @@ ics.ts에 남아있던 도메인 로직 4개를 Match getter로 이동 — `endD
 ### 미실행 항목 (Phase 4 잔여)
 
 - `t1-archive.ics` 등 추억 보존용 archive ICS (옵트인, 누적식) — 별도 PR로 검토
+
+## Phase 4 후속: 매치 메타 풍부화 — 점수·VOD·치지직·LOCATION·BoN 한국어 (2026-05-17)
+
+**결정**: 캘린더 이벤트 DESCRIPTION에 풍부한 매치 메타 통합. **이전 "스포일러 회피" 결정 폐기** (DECISION_MAKING.md §4.3 → §4.7로 갱신).
+
+### 추가된 정보 (상태별 분기)
+
+| 정보                                        | 위치                                    | 가용 시점                             |
+| ------------------------------------------- | --------------------------------------- | ------------------------------------- |
+| 점수 + 승자 (`경기 결과: 2 vs 0 (T1 승)`)   | DESCRIPTION                             | 완료 매치만                           |
+| BoN 한국어 (`3판 2선승제`)                  | DESCRIPTION (SUMMARY는 짧은 `Bo3` 유지) | 모든 매치                             |
+| 경기장 (`📍 치지직 롤파크`)                 | DESCRIPTION + LOCATION 필드             | 모든 매치 (네이버 stadium)            |
+| 치지직 라이브 (`📺 치지직 라이브: ...`)     | DESCRIPTION                             | 예정 매치만                           |
+| lolesports (`📺 lolesports: ...`)           | DESCRIPTION                             | 예정 매치만 (종료 매치는 라이브 무용) |
+| 치지직 다시보기 (`🎬 치지직 다시보기: ...`) | DESCRIPTION                             | 완료 매치만                           |
+
+### 근거
+
+1. **사용자 분포 — 거의 단독**: 본인 우선 가치("점수 보고 싶음") 직접 실현. "다른 사용자 보호" 명분 약함
+2. **옵트인 분리 비용**: 새 ICS·main 분기·landing 옵션 추가 → 과잉설계
+3. **상태별 분기**: 종료 매치엔 라이브 불필요, 완료엔 다시보기, 취소엔 위치만
+4. **SRP 보존**: 모든 메타·게터 `match.ts`에 응집. `ics.ts`는 LOCATION 필드 1줄 추가 + DESCRIPTION 형식화만
+
+### 한계 (정직히)
+
+- 스포일러 위험: 결과 안 보고 싶은 사용자 부담. 미래 사용자 늘면 옵트인 분리(`{팀}-no-results.ics`)로 대응
+- YouTube VOD 미포함: 매치별 정확 URL 자동 생성 불가 → 치지직만 (정확한 ID 있음)
+- 이모지: 일부 텍스트 환경에서 깨질 가능성, 가독성 우선 trade-off
 
 ## 참고 문서
 
