@@ -342,6 +342,7 @@ describe('Match — ICS 출력 표현 (도메인 응집)', () => {
       stage?: string;
       league?: 'LCK' | 'WORLDS';
       startsAt?: string;
+      status?: 'scheduled' | 'completed' | 'canceled';
     } = {},
   ): Match {
     return Match.create({
@@ -352,7 +353,7 @@ describe('Match — ICS 출력 표현 (도메인 응집)', () => {
       teamB: { code: 'GEN', displayName: '젠지' },
       startsAt: overrides.startsAt ?? '2026-05-15T10:00:00.000Z',
       bestOf: overrides.bestOf ?? 3,
-      status: 'scheduled',
+      status: overrides.status ?? 'scheduled',
     });
   }
 
@@ -382,22 +383,141 @@ describe('Match — ICS 출력 표현 (도메인 응집)', () => {
     });
   });
 
-  describe('description: 매치업·대회·BoN·중계 4줄 본문', () => {
-    it('형식 확인', () => {
-      const desc = makeMatch().description;
+  describe('description: 상태별 본문 (예정/완료/취소)', () => {
+    it('예정 매치 (scheduled, 메타 없음): 매치업·대회·BoN한국어 + lolesports만', () => {
+      const desc = makeMatch({ status: 'scheduled' }).description;
       expect(desc).toBe(
-        ['T1 vs 젠지', 'LCK — 1주 차', 'Best of 3', '', '중계: https://lolesports.com/'].join('\n'),
+        [
+          'T1 vs 젠지',
+          'LCK — 1주 차',
+          '3판 2선승제',
+          '',
+          '📺 lolesports: https://lolesports.com/',
+        ].join('\n'),
       );
     });
 
-    it('월드 결승 Bo5', () => {
+    it('예정 매치 + 치지직 채널: 라이브 링크 표시', () => {
+      const desc = makeMatchWithMeta({
+        status: 'scheduled',
+        chzzkChannelId: 'ch123',
+      }).description;
+      expect(desc).toContain('📺 치지직 라이브: https://chzzk.naver.com/live/ch123');
+      expect(desc).toContain('📺 lolesports: https://lolesports.com/');
+    });
+
+    it('완료 매치 + 점수 + replayVideoId: 결과 + 다시보기 (라이브 X)', () => {
+      const desc = makeMatchWithMeta({
+        status: 'completed',
+        score: { home: 2, away: 0, winner: 'HOME' },
+        replayVideoId: 999,
+      }).description;
+      expect(desc).toContain('경기 결과: 2 vs 0 (T1 승)');
+      expect(desc).toContain('🎬 치지직 다시보기: https://chzzk.naver.com/video/999');
+      expect(desc).not.toContain('📺 lolesports'); // 종료 매치는 라이브 무용
+      expect(desc).not.toContain('치지직 라이브');
+    });
+
+    it('완료 매치 + 점수 AWAY 승: winnerName이 teamB', () => {
+      const desc = makeMatchWithMeta({
+        status: 'completed',
+        score: { home: 1, away: 2, winner: 'AWAY' },
+      }).description;
+      expect(desc).toContain('경기 결과: 1 vs 2 (젠지 승)');
+    });
+
+    it('취소 매치: 위치만 (중계·결과·다시보기 모두 X)', () => {
+      const desc = makeMatchWithMeta({ status: 'canceled', stadium: '치지직 롤파크' }).description;
+      expect(desc).toContain('📍 치지직 롤파크');
+      expect(desc).not.toContain('📺');
+      expect(desc).not.toContain('🎬');
+      expect(desc).not.toContain('경기 결과');
+    });
+
+    it('LOCATION 데이터 있으면 📍 행 추가', () => {
+      const desc = makeMatchWithMeta({ stadium: '치지직 롤파크' }).description;
+      expect(desc).toContain('📍 치지직 롤파크');
+    });
+
+    it('LOCATION 데이터 없으면 📍 행 누락', () => {
+      const desc = makeMatchWithMeta({ stadium: undefined }).description;
+      expect(desc).not.toContain('📍');
+    });
+
+    it('월드 결승 Bo5: 한국어 본문', () => {
       const desc = makeMatch({ league: 'WORLDS', stage: '결승', bestOf: 5 }).description;
       expect(desc).toContain('월드 챔피언십 — 결승');
-      expect(desc).toContain('Best of 5');
+      expect(desc).toContain('5판 3선승제');
+    });
+  });
+
+  describe('Bo별 한국어 라벨', () => {
+    it('Bo1 → 단판제', () => {
+      expect(makeMatch({ bestOf: 1 }).bestOfLabel).toBe('단판제');
+    });
+    it('Bo3 → 3판 2선승제', () => {
+      expect(makeMatch({ bestOf: 3 }).bestOfLabel).toBe('3판 2선승제');
+    });
+    it('Bo5 → 5판 3선승제', () => {
+      expect(makeMatch({ bestOf: 5 }).bestOfLabel).toBe('5판 3선승제');
+    });
+  });
+
+  describe('새 게터 (Phase 4 매치 메타)', () => {
+    it('location은 stadium 그대로', () => {
+      expect(makeMatchWithMeta({ stadium: '치지직 롤파크' }).location).toBe('치지직 롤파크');
+      expect(makeMatchWithMeta({ stadium: undefined }).location).toBeUndefined();
+    });
+
+    it('chzzkLiveUrl: chzzkChannelId 있으면 URL, 없으면 undefined', () => {
+      expect(makeMatchWithMeta({ chzzkChannelId: 'abc' }).chzzkLiveUrl).toBe(
+        'https://chzzk.naver.com/live/abc',
+      );
+      expect(makeMatchWithMeta({ chzzkChannelId: undefined }).chzzkLiveUrl).toBeUndefined();
+    });
+
+    it('vodUrl: replayVideoId 있으면 URL, 없으면 undefined', () => {
+      expect(makeMatchWithMeta({ replayVideoId: 12345 }).vodUrl).toBe(
+        'https://chzzk.naver.com/video/12345',
+      );
+      expect(makeMatchWithMeta({ replayVideoId: undefined }).vodUrl).toBeUndefined();
+    });
+
+    it('scoreLabel: score 있으면 한 줄, 없으면 undefined', () => {
+      expect(makeMatchWithMeta({ score: { home: 2, away: 1, winner: 'HOME' } }).scoreLabel).toBe(
+        '경기 결과: 2 vs 1 (T1 승)',
+      );
+      expect(makeMatchWithMeta({ score: undefined }).scoreLabel).toBeUndefined();
     });
   });
 
   it('streamUrl: lolesports 단일화', () => {
     expect(makeMatch().streamUrl).toBe('https://lolesports.com/');
   });
+
+  // Phase 4 새 필드 받는 헬퍼
+  function makeMatchWithMeta(
+    overrides: {
+      status?: 'scheduled' | 'completed' | 'canceled';
+      score?: { home: number; away: number; winner: 'HOME' | 'AWAY' };
+      stadium?: string;
+      chzzkChannelId?: string;
+      replayVideoId?: number;
+    } = {},
+  ): Match {
+    return Match.create({
+      id: 'naver:x',
+      league: 'LCK',
+      stage: '1주 차',
+      teamA: { code: 'T1', displayName: 'T1' },
+      teamB: { code: 'GEN', displayName: '젠지' },
+      startsAt: '2026-05-15T10:00:00.000Z',
+      bestOf: 3,
+      status: overrides.status ?? 'scheduled',
+      score: overrides.score,
+      stadium: overrides.stadium,
+      chzzkChannelId: overrides.chzzkChannelId,
+      replayVideoId: overrides.replayVideoId,
+    });
+  }
 });
