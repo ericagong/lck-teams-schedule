@@ -67,10 +67,19 @@ function tokenizeAtoms(line: string): string[] {
  * fold된 URL을 unfold하지 않고 자동 링크화 정규식을 돌리면 fold 경계 뒤
  * 토큰이 잘려나가는 현상(예: `.../1049188` → `10491` 까지만 링크) 회피.
  * URL 자체가 한 청크에 안 들어갈 만큼 길면 char 단위로 fallback.
+ *
+ * URL 인라인 완화: Google Calendar는 URL이 fold chunk 첫머리에 단독으로
+ * 떨어지면 unfold 후 autolink 정규식이 URL 끝 3~4자를 텍스트로 처리하는
+ * quirk가 있음(Apple·Outlook은 정상). 회피를 위해 URL atom 직전에 prefix가
+ * 있으면 RFC §3.1 권장 75 octet을 한정적으로 어겨(`SHOULD NOT`, MUST 아님)
+ * URL을 직전 prefix와 같은 라인에 유지. 주요 클라이언트 모두 긴 라인 수용.
  */
 function foldLine(line: string): string {
   const FIRST_MAX_BYTES = 75;
   const CONT_MAX_BYTES = 74;
+  // URL atom을 직전 prefix와 같은 라인에 묶기 위한 완화 한도. 단일 URL이
+  // 직전 prefix와 합쳐도 안전한 상한선 — 주요 캘린더 앱 모두 수용.
+  const URL_INLINE_RELAX_BYTES = 200;
   const encoder = new TextEncoder();
   if (encoder.encode(line).length <= FIRST_MAX_BYTES) return line;
 
@@ -93,7 +102,10 @@ function foldLine(line: string): string {
   for (const atom of tokenizeAtoms(line)) {
     const atomBytes = encoder.encode(atom).length;
     if (atomBytes <= CONT_MAX_BYTES) {
-      if (currentBytes + atomBytes > limit() && current.length > 0) {
+      const isUrlAtom = /^https?:\/\//.test(atom);
+      // URL atom이고 직전 prefix가 같은 chunk에 있으면 완화 한도까지 inline 유지
+      const effectiveLimit = isUrlAtom && current.length > 0 ? URL_INLINE_RELAX_BYTES : limit();
+      if (currentBytes + atomBytes > effectiveLimit && current.length > 0) {
         chunks.push(current);
         current = '';
         currentBytes = 0;
