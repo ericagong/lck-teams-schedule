@@ -111,7 +111,6 @@ export class Match {
     );
   }
 
-  // e.g., "T1 vs 젠지 — LCK 1주 차 (Bo3)"
   get summary(): string {
     const matchup = `${this.teamA.displayName} vs ${this.teamB.displayName}`;
     return `[${LEAGUE_SHORT_CODE[this.league]}] ${matchup}`;
