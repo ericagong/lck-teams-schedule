@@ -372,8 +372,7 @@ describe('Match — ICS 출력 표현 (도메인 응집)', () => {
   describe('description: 상태별 본문 (예정/완료/취소)', () => {
     // 모든 매치 공통 trailer — VALARM 미포함 설계 안내 + URL autolink 보조
     // (Google Calendar 모바일 quirk: URL이 텍스트 끝에 위치 시 끝자리 토큰화 실패).
-    const ALARM_HINT =
-      '🔔 경기 전 알람을 자유롭게 설정할 수 있어요 (설정 - 캘린더 선택 - 기본 알람 추가)';
+    const ALARM_HINT = '🔔 경기 알람도 설정할 수 있어요!(설정-> 캘린더 선택-> 기본 알람 추가)';
 
     it('예정 매치 (메타 없음): 🎯 stage + 🎮 BoN + 🔔 trailer', () => {
       const desc = makeMatch({ status: 'scheduled' }).description;
