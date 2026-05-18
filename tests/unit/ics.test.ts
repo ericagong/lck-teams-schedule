@@ -266,13 +266,10 @@ describe('generateIcs', () => {
       expect(result).toMatch(/\r\n [^\r\n]/);
     });
 
-    // URL 비포함 라인은 RFC §3.1 권장 75 octet 엄수.
-    // URL 포함 라인은 의도적 완화(아래 URL 인라인 테스트 참고).
-    it('URL 미포함 라인은 폴딩 후에도 모두 75바이트 이하', () => {
+    it('폴딩 후에도 모든 라인이 75바이트 이하', () => {
       const result = ics([longStageMatch]);
       const encoder = new TextEncoder();
       for (const line of result.split('\r\n')) {
-        if (/https?:\/\//.test(line)) continue;
         expect(encoder.encode(line).length).toBeLessThanOrEqual(75);
       }
     });
@@ -310,56 +307,6 @@ describe('generateIcs', () => {
       const url = 'https://game.naver.com/esports/League_of_Legends/videos/1049188';
       const lines = result.split('\r\n');
       expect(lines.some((line) => line.includes(url))).toBe(true);
-    });
-
-    // Google Calendar는 URL이 fold chunk 첫머리에 단독으로 떨어지면 unfold 후
-    // autolink 정규식이 URL 끝 3~4자를 텍스트로 처리하는 quirk(Apple·Outlook 정상).
-    // URL atom 한정으로 fold 한도를 완화해 직전 prefix와 같은 라인에 묶어 회피.
-    it('URL atom은 직전 prefix가 있으면 같은 라인에 inline 유지 (단독 chunk 회피)', () => {
-      const completed = Match.create({
-        id: 'naver:115548128962840643',
-        league: 'LCK',
-        stage: '2주 차',
-        teamA: { code: 'T1', displayName: 'T1' },
-        teamB: { code: 'GEN', displayName: '젠지' },
-        startsAt: '2026-04-08T10:00:00.000Z',
-        bestOf: 3,
-        status: 'completed',
-        score: { home: 2, away: 0, winner: 'HOME' },
-        replayVideoId: 1049188,
-      });
-      const result = ics([completed]);
-      const url = 'https://game.naver.com/esports/League_of_Legends/videos/1049188';
-      const lines = result.split('\r\n');
-      // URL이 등장하는 라인을 찾아, URL 앞에 prefix 텍스트가 있는지 확인.
-      // (단독 chunk였다면 라인이 " <URL>" 형태로 URL만 단독으로 있게 됨)
-      const urlLine = lines.find((l) => l.includes(url));
-      expect(urlLine).toBeDefined();
-      const beforeUrl = urlLine!.slice(0, urlLine!.indexOf(url));
-      // 연속행 leading space 1개를 제외하면 prefix가 비어있지 않아야 함
-      expect(beforeUrl.replace(/^ /, '').length).toBeGreaterThan(0);
-    });
-
-    // URL 라인은 RFC §3.1 권장 75 octet을 의도적으로 어기지만(URL atom 한정),
-    // 무제한이 아닌 명시 상한(200B)을 두어 단일 URL이 합리적 한도 안에 들도록 보장.
-    it('URL atom 인라인 완화는 합리적 상한(<=200B) 안에서만 적용', () => {
-      const completed = Match.create({
-        id: 'naver:115548128962840643',
-        league: 'LCK',
-        stage: '2주 차',
-        teamA: { code: 'T1', displayName: 'T1' },
-        teamB: { code: 'GEN', displayName: '젠지' },
-        startsAt: '2026-04-08T10:00:00.000Z',
-        bestOf: 3,
-        status: 'completed',
-        score: { home: 2, away: 0, winner: 'HOME' },
-        replayVideoId: 1049188,
-      });
-      const result = ics([completed]);
-      const encoder = new TextEncoder();
-      for (const line of result.split('\r\n')) {
-        expect(encoder.encode(line).length).toBeLessThanOrEqual(200);
-      }
     });
   });
 });
