@@ -39,8 +39,7 @@ const BEST_OF_LABEL: Readonly<Record<BestOf, string>> = {
  * 경로는 캘린더 단위 일괄 설정(한 번이면 모든 매치 자동 적용). 이벤트마다
  * 수동 추가는 번거로워 채택 안 함. README §107~111과 정렬.
  */
-const ALARM_HINT_TRAILER =
-  '🔔 경기 전 알람을 자유롭게 설정할 수 있어요 (설정 - 캘린더 선택 - 기본 알람 추가)';
+const ALARM_HINT_TRAILER = '🔔 경기 알람도 설정할 수 있어요!(설정-> 캘린더 선택-> 기본 알람 추가)';
 
 type MatchProps = {
   readonly id: string;

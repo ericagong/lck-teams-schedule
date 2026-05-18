@@ -442,6 +442,56 @@ get description(): string {
 - **SUMMARY로 결승 식별 약화**: 정규시즌·결승 SUMMARY 동일 형식. 다만 결승은 Bo5(150분)라 그리드 블록 크기로 자연 강조
 - **첫 적용 SEQUENCE 일제 +1**: SUMMARY/DESC 변경으로 X-CONTENT-HASH 일제 변경 → 모든 매치 SEQUENCE+1 1회 발생. §4.8 자연 동작, 1회성 노이즈
 
+### 4.10 DESCRIPTION trailer 도입 — Google Calendar 모바일 autolink quirk 회피 + VALARM 안내 (2026-05-18, 진단 2차 갱신)
+
+**문제**: Google Calendar **모바일** 앱에서 DESCRIPTION의 URL(`https://chzzk.naver.com/live/...{32 hex}`·`https://game.naver.com/.../videos/{7 digit}`) 끝 3~4자가 일반 텍스트로 처리되어 클릭이 잘못된 페이지로 이동. Apple Calendar·Outlook·Google Calendar **데스크탑** 웹은 정상.
+
+ICS 파일 자체는 RFC 5545 정합(hex dump + unfold 시뮬레이션으로 검증). URL property·DESCRIPTION 모두에 URL 전체가 손상 없이 존재.
+
+**대안**:
+
+- a. ICS 라이브러리(ts-ics/ical-generator) 교체 — 모두 RFC 권장 75 octet 지키므로 동일 패턴 출력, **버그 미해결**
+- b. `foldLine` URL atom 인라인 완화 — URL이 fold chunk 첫머리에 단독으로 떨어지는 패턴이 트리거라는 가설. 시행 후 **모바일에서 효과 없음 확인** → revert
+- c. URL을 자기 \n 줄로 분리(라벨\n\nURL) — display에서 URL이 inline 텍스트 뒤에 있으면 트리거라는 가설. 시뮬레이션 결과 fold 구조 동일(URL 여전히 단독 chunk)
+- d. URL 뒤에 trailer 한 줄 추가 ← **선택**
+- e. URL property만 쓰고 DESCRIPTION에서 URL 텍스트 제거 — Apple/Outlook의 URL property 별도 UI 가치 손상
+
+**선택**: d — `🔔 경기 알람도 설정할 수 있어요!(설정-> 캘린더 선택-> 기본 알람 추가)` trailer를 모든 매치 description 마지막 줄에 항상 추가.
+
+**근거**:
+
+1. **진짜 트리거**: Google Calendar 모바일 native autolinker는 _"URL이 description 텍스트 끝에 위치할 때"_ 마지막 N자를 토큰화하지 못함. 사용자 수동 테스트로 확인 (length·fold 구조 무관, URL 뒤 비어있지 않은 텍스트만 있으면 정상)
+2. **trailer는 노이즈가 아닌 신호**: VALARM 미포함 설계([§1.3 개인화 위임](#13-왜-개인화를-위임하는가-valarm-미포함))를 사용자에게 명시적으로 안내 — _"왜 알림이 안 와요?"_ 질문 사전 차단
+3. **캘린더 단위 일괄 설정 경로**: 한 번이면 모든 매치 자동 적용 (이벤트마다 수동 추가는 번거로움). [README §107~111](./README.md)과 정렬
+4. **노이즈 한도**: description은 사용자가 펼쳤을 때만 보임, 매번 강제 노출 아님 + 한 줄 ~40자
+5. **다른 URL 미포함**: trailer 안에 URL을 넣지 않아 autolink 재발 위험 0
+
+**구현 — `src/match.ts`**:
+
+```ts
+const ALARM_HINT_TRAILER = '🔔 경기 알람도 설정할 수 있어요!(설정-> 캘린더 선택-> 기본 알람 추가)';
+
+get description(): string {
+  return [stageText(), bestOfText(), scoreText(), streamText(), ALARM_HINT_TRAILER]
+    .filter(...).join('\n');
+}
+```
+
+**진단 진화 — 시행착오 두 차례**:
+
+| 차수         | 가설                                                                                                                     | 검증 결과               |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------ | ----------------------- |
+| 1차 (PR #19) | fold chunk 경계가 URL 직전에 떨어지면 트리거 → URL atom을 직전 prefix와 같은 라인에 inline 유지 (RFC 75 octet 한정 완화) | ❌ 모바일에서 효과 없음 |
+| 2차 (PR #20) | URL이 description 텍스트 끝에 위치 → trailer로 URL 뒤에 텍스트 보장                                                      | ✅ 모바일 정상          |
+
+→ 1차 패치(PR #19)는 잘못된 진단이었음. RFC `SHOULD NOT 75 octet` 위반 + 효과 없음 → 2차에서 revert해 정합 복귀.
+
+**한계**:
+
+- **trailer 경로는 Google Calendar 모바일 기준**: 한국 LCK 팬 대다수가 사용. Apple/Outlook 사용자는 "캘린더 앱 설정에서 찾아야 하는구나" 정도로 일반 안내 충족
+- **첫 적용 SEQUENCE 일제 +1**: description 변경으로 X-CONTENT-HASH 일제 변경 → 모든 매치 SEQUENCE +1 1회. [§4.8](#48-동기화-메타-rfc-정합--sequencelast-modifiedcreatedx-content-hash-도입-2026-05-18) 자연 동작
+- **Google Calendar 내부 quirk 자체는 미해결**: 우리는 트리거를 회피할 뿐, 클라이언트가 고치면 trailer는 단순 안내문으로만 기능 (해는 없음)
+
 ---
 
 ## 5. 도메인 모델 — Match를 narrow waist로
