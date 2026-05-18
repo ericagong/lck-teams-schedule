@@ -31,6 +31,17 @@ const BEST_OF_LABEL: Readonly<Record<BestOf, string>> = {
   5: '5판 3선승제',
 };
 
+/**
+ * description 마지막 줄 — VALARM 미포함 설계(개인화 위임)를 사용자에게 안내 +
+ * URL 뒤에 비어있지 않은 텍스트를 두어 Google Calendar 모바일 autolinker가
+ * URL 끝자리를 정상 토큰화하도록 보조. 자세한 설명은 description getter 주석.
+ *
+ * 경로는 캘린더 단위 일괄 설정(한 번이면 모든 매치 자동 적용). 이벤트마다
+ * 수동 추가는 번거로워 채택 안 함. README §107~111과 정렬.
+ */
+const ALARM_HINT_TRAILER =
+  '🔔 경기 전 알람을 자유롭게 설정할 수 있어요 (설정 - 캘린더 선택 - 기본 알람 추가)';
+
 type MatchProps = {
   readonly id: string;
   readonly league: League;
@@ -130,9 +141,23 @@ export class Match {
    *   - 🎮 형식 (모든 매치)
    *   - 🏆 경기 결과 (완료만)
    *   - 📺 라이브 (예정만) / 🎬 다시보기 (완료만)
+   *   - 🔔 알림 안내 trailer (모든 매치 공통, 항상 마지막)
+   *
+   * trailer를 항상 끝에 두는 이유: Google Calendar 모바일 native autolinker는
+   * URL이 description 텍스트 끝에 위치하면 마지막 N자를 토큰화하지 못하는
+   * quirk가 있어(데스크탑·Apple·Outlook은 정상), URL 뒤에 비어있지 않은
+   * 텍스트가 있으면 autolink 경계를 정확히 잡음. 동시에 trailer는
+   * VALARM 미포함 설계(개인화 위임 원칙)를 사용자에게 안내하는 가치가 있어
+   * 노이즈가 아닌 신호로 정당화됨.
    */
   get description(): string {
-    return [this.stageText(), this.bestOfText(), this.scoreText(), this.streamText()]
+    return [
+      this.stageText(),
+      this.bestOfText(),
+      this.scoreText(),
+      this.streamText(),
+      ALARM_HINT_TRAILER,
+    ]
       .filter((line): line is string => line !== null)
       .join('\n');
   }

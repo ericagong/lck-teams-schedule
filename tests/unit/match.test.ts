@@ -370,9 +370,14 @@ describe('Match — ICS 출력 표현 (도메인 응집)', () => {
   });
 
   describe('description: 상태별 본문 (예정/완료/취소)', () => {
-    it('예정 매치 (메타 없음): 🎯 stage + 🎮 BoN', () => {
+    // 모든 매치 공통 trailer — VALARM 미포함 설계 안내 + URL autolink 보조
+    // (Google Calendar 모바일 quirk: URL이 텍스트 끝에 위치 시 끝자리 토큰화 실패).
+    const ALARM_HINT =
+      '🔔 경기 전 알람을 자유롭게 설정할 수 있어요 (설정 - 캘린더 선택 - 기본 알람 추가)';
+
+    it('예정 매치 (메타 없음): 🎯 stage + 🎮 BoN + 🔔 trailer', () => {
       const desc = makeMatch({ status: 'scheduled' }).description;
-      expect(desc).toBe(['🎯 1주 차', '🎮 Bo3 (3판 2선승제)'].join('\n'));
+      expect(desc).toBe(['🎯 1주 차', '🎮 Bo3 (3판 2선승제)', ALARM_HINT].join('\n'));
     });
 
     it('예정 매치 + 치지직 채널: 라이브 링크 표시', () => {
@@ -406,12 +411,30 @@ describe('Match — ICS 출력 표현 (도메인 응집)', () => {
       expect(desc).toContain('🏆 경기 결과: 1 vs 2 (젠지 승)');
     });
 
-    it('취소 매치: 🎯 stage + 🎮 BoN만 (중계·결과·다시보기 모두 X)', () => {
+    it('취소 매치: 🎯 stage + 🎮 BoN + 🔔 trailer (중계·결과·다시보기 모두 X)', () => {
       const desc = makeMatchWithMeta({ status: 'canceled', stadium: '치지직 롤파크' }).description;
-      expect(desc).toBe(['🎯 1주 차', '🎮 Bo3 (3판 2선승제)'].join('\n'));
+      expect(desc).toBe(['🎯 1주 차', '🎮 Bo3 (3판 2선승제)', ALARM_HINT].join('\n'));
       expect(desc).not.toContain('📺');
       expect(desc).not.toContain('🎬');
       expect(desc).not.toContain('🏆');
+    });
+
+    // trailer가 모든 상태에서 description의 마지막 줄에 위치해야 — Google Calendar
+    // 모바일 autolinker가 URL 끝자리 토큰화하려면 URL 뒤에 비어있지 않은 텍스트 필수.
+    it('trailer는 모든 상태에서 description의 마지막 줄에 위치', () => {
+      const scheduled = makeMatchWithMeta({
+        status: 'scheduled',
+        chzzkChannelId: 'ch1',
+      }).description;
+      const completed = makeMatchWithMeta({
+        status: 'completed',
+        score: { home: 2, away: 0, winner: 'HOME' },
+        replayVideoId: 999,
+      }).description;
+      const canceled = makeMatchWithMeta({ status: 'canceled' }).description;
+      expect(scheduled.endsWith(ALARM_HINT)).toBe(true);
+      expect(completed.endsWith(ALARM_HINT)).toBe(true);
+      expect(canceled.endsWith(ALARM_HINT)).toBe(true);
     });
 
     it('LOCATION 정보는 DESCRIPTION에 미포함 (ICS LOCATION 필드 책임)', () => {
@@ -431,7 +454,7 @@ describe('Match — ICS 출력 표현 (도메인 응집)', () => {
         bestOf: 5,
         status: 'scheduled',
       });
-      expect(noStage.description).toBe('🎮 Bo5 (5판 3선승제)');
+      expect(noStage.description).toBe(['🎮 Bo5 (5판 3선승제)', ALARM_HINT].join('\n'));
       expect(noStage.description).not.toContain('🎯');
     });
 
