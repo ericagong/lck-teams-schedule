@@ -233,4 +233,4 @@ https://ericagong.github.io/lck-teams-schedule/t1.ics?v=20260517
 
 ## 라이선스
 
-[MIT](./LICENSE)
+[MIT](./LICENSE) (저작권자: ericagong)
