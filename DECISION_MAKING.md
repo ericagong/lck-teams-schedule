@@ -585,6 +585,57 @@ Naver adapter  ──→  Match  ←──  ICS generator
 
 **한계**: 요청 도착 인지가 24h 이상 걸리면 SLA 위반 가능 (예: 운영자 휴가). 백업 컨택트 미정.
 
+### 6.5 main 보호 ruleset — PR 강제 + CI gating + force push/delete 차단 (2026-05-19)
+
+**문제**: 1인 운영 + Phase 4 빠른 iteration 환경에서 ① main 직접 push 실수, ② CI 미통과 코드가 main 잠입, ③ 실수 force push / 삭제로 history 손상 위험. dogfood하는 본인이 가장 흔한 실수의 주체.
+
+**대안**:
+
+- **A. Classic branch protection** — deprecate 예정, 세분화 룰 부족
+- **B. Repository ruleset** (선택) — 현 권장. 룰 enforcement·bypass·rule-suites audit log 풍부
+- **C. 룰 미설정** — cron fail-loud로 사후 대응만, main 자체는 무방비
+
+**선택**: Repository ruleset `[branch] main - protection` (`enforcement=active`, `target=~DEFAULT_BRANCH`).
+
+룰 구성:
+
+| 룰                        | 설정                                                                             | 의도                                                       |
+| ------------------------- | -------------------------------------------------------------------------------- | ---------------------------------------------------------- |
+| `pull_request`            | required_approving_review_count=0, squash-only, dismiss-stale, thread-resolution | 변경 가시화 + 머지 단위 통일 + 미해결 댓글 차단            |
+| `required_status_checks`  | `check` job (strict policy)                                                      | typecheck+lint+format+test 통과해야 머지                   |
+| `non_fast_forward`        | —                                                                                | force push 차단 (history 손상 방지)                        |
+| `deletion`                | —                                                                                | branch 삭제 차단 (단, default branch엔 redundant — 한계 1) |
+| `required_linear_history` | —                                                                                | merge commit 차단, squash-only와 짝                        |
+| `copilot_code_review`     | review_on_push=true                                                              | PR push마다 LLM 자동 리뷰 (1인 운영 보조)                  |
+
+**Bypass**: Admin이지만 `bypass_mode=pull_request` (PR 경로만). raw git op(`git push`, `--force`, `--delete`)은 admin도 차단.
+
+**근거**:
+
+1. **CI 통과 강제 → 깨진 main 0건 보장** — `pnpm check`가 머지 게이트. Phase 4 retest 비용·rollback 부담 절감.
+2. **PR 강제 → self-review + Copilot 자동 리뷰 시점 확보** — 1인 운영이라도 변경 한 번 들여다보는 강제 + LLM 보조.
+3. **squash-only + linear history** — 1 PR = 1 commit = 1 decision. `git log --oneline`과 DECISION_MAKING archive의 가독성 일관.
+4. **bypass=PR-only** — admin 실수(`git push origin main`)로 main 무너지는 경로 차단. 진짜 비상시엔 ruleset 일시 비활성 또는 PR + auto-merge로 우회.
+
+**한계**:
+
+1. **`deletion` rule은 default branch에선 redundant** — GitHub core가 이미 default branch 삭제 거부 (2026-05-19 검증: `refusing to delete the current branch`로 ruleset 평가 _이전_ 차단). UI에 켜둬도 무해하지만 실효성 없음. non-default branch도 protect할 때만 의미.
+2. **1인 운영 → 0 required approvals** — 인적 third-party review 부재. self-review + Copilot 보조에 의존.
+3. **bypass=PR-only가 비상 hotfix 경로를 좁힘** — main 직접 hotfix 불가. 진짜 비상시엔 ruleset 일시 비활성(admin 권한) 또는 PR + 빠른 머지.
+
+**검증** (2026-05-19, 시나리오 1~6):
+
+| #   | 시나리오              | 결과                                                                  |
+| --- | --------------------- | --------------------------------------------------------------------- |
+| 1   | Happy PR (CI pass)    | ✅ `mergeable=MERGEABLE`, `mergeStateStatus=CLEAN`                    |
+| 2   | CI fail PR            | ✅ `mergeStateStatus=BLOCKED`                                         |
+| 3   | main 직접 push        | ✅ GH013 (`pull_request` + `required_status_checks` 둘 다 fail)       |
+| 4   | rule-suites 감사 로그 | ✅ 모든 룰 결과 entry로 기록 (`pass`/`fail`/`details`)                |
+| 5   | main force push       | ✅ GH013 `Cannot force-push to this branch` (`non_fast_forward` fail) |
+| 6   | main 삭제             | ⚠️ N/A — GitHub core가 ruleset 평가 전 차단 (한계 1 참조)             |
+
+이 §6.5를 정리한 PR 자체가 ruleset의 첫 dogfood — PR 경로 강제 + `check` job 통과 강제가 그대로 적용됨.
+
 ---
 
 ## 7. 알려진 한계 (Limitations 요약)
