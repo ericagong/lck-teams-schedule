@@ -128,3 +128,5 @@ main().catch((err) => {
   log.error('Failed to publish ICS', err);
   process.exit(1);
 });
+
+const _intentional_type_error: number = 'string';
