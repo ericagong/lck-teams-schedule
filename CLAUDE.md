@@ -36,7 +36,7 @@ LCK 팬을 위한 팀별 일정 자동 동기화 `.ics` 피드. 톡캘린더처�
 src/
 ├── league.ts        # League · LEAGUE_DISPLAY_NAME · LEAGUE_SHORT_CODE (도메인)
 ├── team.ts          # Team · LckTeamCode · LCK_TEAMS · LCK_TEAM_DISPLAY_NAME · toTeam (도메인)
-├── match.ts         # Match (클래스) · BestOf · MatchStatus · assertBestOf
+├── match.ts         # Match (클래스) · BestOf · MatchStatus · isBestOf
 ├── naver.ts         # ⚠️ API fetcher (유일한 side effect) + parser (순수)
 ├── ics.ts           # Match[] → ICS string (순수, RFC 5545, UTC compact)
 ├── sync-meta.ts     # SEQUENCE/LAST-MODIFIED 결정 + 이전 ICS parser + contentHash (순수)
