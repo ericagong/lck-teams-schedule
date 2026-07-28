@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { getScheduleMonths, toMatch } from '../../src/naver.js';
+import { getScheduleMonths, toMatch, toMatches } from '../../src/naver.js';
 import { ALL_LEAGUES, LEAGUE_DISPLAY_NAME } from '../../src/league.js';
+import type { Match } from '../../src/match.js';
+
+/** parsed 결과에서 Match 추출 — 아니면 null (테스트 가독성용). */
+function parsedMatch(raw: unknown): Match | null {
+  const result = toMatch(raw);
+  return result.kind === 'parsed' ? result.match : null;
+}
 
 /** 네이버 raw 매치 fixture — 필수 필드만. */
 function rawMatch(overrides: Record<string, unknown> = {}): Record<string, unknown> {
@@ -67,24 +74,67 @@ describe('getScheduleMonths — rolling 5 month window (과거 3 + 현재 + 미�
 
 describe('toMatch — winner 값 회귀 (네이버는 예정 매치에 NONE 응답)', () => {
   it('예정 매치 winner="NONE"도 parse 통과 (silent 누락 회귀 방지)', () => {
-    const match = toMatch(rawMatch({ matchStatus: 'BEFORE', winner: 'NONE' }));
+    const match = parsedMatch(rawMatch({ matchStatus: 'BEFORE', winner: 'NONE' }));
     expect(match).not.toBeNull();
     expect(match?.status).toBe('scheduled');
     expect(match?.score).toBeUndefined(); // NONE → score 없음
   });
 
   it('완료 매치 winner="HOME"은 score 포함', () => {
-    const match = toMatch(
+    const match = parsedMatch(
       rawMatch({ matchStatus: 'RESULT', winner: 'HOME', homeScore: 2, awayScore: 0 }),
     );
     expect(match?.score).toEqual({ home: 2, away: 0, winner: 'HOME' });
   });
 
   it('완료 매치 winner="AWAY"도 score 포함', () => {
-    const match = toMatch(
+    const match = parsedMatch(
       rawMatch({ matchStatus: 'RESULT', winner: 'AWAY', homeScore: 1, awayScore: 2 }),
     );
     expect(match?.score).toEqual({ home: 1, away: 2, winner: 'AWAY' });
+  });
+});
+
+describe('toMatch — 행 단위 격리 (issue #38: bestOf=0 매치 1개가 전체 발행 중단 회귀 방지)', () => {
+  it('bestOf 계약 위반(0) → throw 대신 anomaly 반환 (gameId·이유 포함)', () => {
+    const result = toMatch(rawMatch({ gameId: '202607271500bHNlYhlol', maxMatchCount: 0 }));
+    expect(result.kind).toBe('anomaly');
+    if (result.kind === 'anomaly') {
+      expect(result.anomaly.gameId).toBe('202607271500bHNlYhlol');
+      expect(result.anomaly.reason).toContain('bestOf 계약 위반: 0');
+    }
+  });
+
+  it('bestOf 계약 위반(2·7 등 비표준 값)도 anomaly', () => {
+    expect(toMatch(rawMatch({ maxMatchCount: 2 })).kind).toBe('anomaly');
+    expect(toMatch(rawMatch({ maxMatchCount: 7 })).kind).toBe('anomaly');
+  });
+
+  it('schema 불일치(zod parse 실패)도 anomaly — gameId 최대한 보존', () => {
+    const result = toMatch({ gameId: 'broken-row', startDate: 'not-a-number' });
+    expect(result.kind).toBe('anomaly');
+    if (result.kind === 'anomaly') {
+      expect(result.anomaly.gameId).toBe('broken-row');
+    }
+  });
+
+  it('비대상 리그는 anomaly가 아닌 skipped (의도된 제외)', () => {
+    expect(toMatch(rawMatch({ topLeagueId: 'lpl' })).kind).toBe('skipped');
+  });
+
+  it('TBD 팀(homeTeam null)도 skipped (의도된 제외)', () => {
+    expect(toMatch(rawMatch({ homeTeam: null })).kind).toBe('skipped');
+  });
+
+  it('toMatches — 이상 행 1개가 나머지 정상 매치 발행을 막지 않음', () => {
+    const { matches, anomalies } = toMatches([
+      rawMatch({ gameId: 'ok-1' }),
+      rawMatch({ gameId: 'bad-1', maxMatchCount: 0 }),
+      rawMatch({ gameId: 'ok-2' }),
+    ]);
+    expect(matches).toHaveLength(2);
+    expect(anomalies).toHaveLength(1);
+    expect(anomalies[0]?.gameId).toBe('bad-1');
   });
 });
 

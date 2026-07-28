@@ -26,6 +26,7 @@ const EMPTY_PREVIOUS: PreviousSyncMap = new Map();
 
 const log = {
   info: (msg: string) => console.log(`${LOG_PREFIX} ${msg}`),
+  warn: (msg: string) => console.warn(`${LOG_PREFIX} WARN: ${msg}`),
   error: (msg: string, err: unknown) => console.error(`${LOG_PREFIX} FATAL: ${msg}`, err),
 };
 
@@ -90,8 +91,17 @@ async function publishLandingPage(): Promise<void> {
 
 async function main(): Promise<void> {
   log.info('Fetch Match Schedules from NaverEsports...');
-  const matches = await fetchAllMatches();
+  const { matches, anomalies } = await fetchAllMatches();
   log.info(`Got ${matches.length} matches.`);
+
+  // 행 단위 데이터 이상은 격리 + 경고 — 전체 발행은 계속 (fail-loud는 인프라 실패 전용).
+  // 대량 이상(전 매치 parse fail 등)은 아래 sanity check(0 matches / 0 future)가 잡음.
+  for (const a of anomalies) {
+    log.warn(`⚠️ 매치 격리: gameId=${a.gameId} — ${a.reason}`);
+  }
+  if (anomalies.length > 0) {
+    log.warn(`⚠️ 총 ${anomalies.length}개 매치가 데이터 이상으로 발행에서 제외됨`);
+  }
 
   // Sanity check — fetch는 성공했지만 모든 매치가 parse fail이면 silent fail.
   // 빈 ICS 발행 시 사용자 캘린더 통째 비어지므로 명시적으로 워크플로 실패시킴.

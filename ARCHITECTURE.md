@@ -73,14 +73,15 @@ flowchart TD
 
 가장 정보 손실이 큰 단계. `naver.ts:toMatch`의 zod safeParse + 가드에 결정을 응축 → ②~④는 source 무관 (다른 소스로 전환할 일이 생겨도 ②~④는 그대로).
 
-| 행위                                                    | 처리 위치                                                                |
-| ------------------------------------------------------- | ------------------------------------------------------------------------ |
-| 타입 가드 (TBD, teams.length, 누락 필드 등) silent drop | `naver.ts:toMatch` (zod safeParse + null 분기)                           |
-| 시간 정규화 → UTC ISO                                   | `naver.ts:epochMsToIsoUtc` (epoch ms → ISO)                              |
-| `bestOf` 1·3·5만 허용, 외는 throw                       | `match.ts:assertBestOf` (Bo2·Bo7 등 계약 위반 → throw)                   |
-| status 정규화 (3값으로 축소)                            | `matchStatus` → `toMatchStatus` (`scheduled` · `completed` · `canceled`) |
-| 한국어 팀 displayName                                   | LCK 팀은 도메인 표준(`LCK_TEAM_DISPLAY_NAME`), 그 외 네이버 값 그대로    |
-| UID 멱등성 + namespace                                  | `naver:${gameId}` 접두 (소스 전환 시 충돌 회피용 namespace)              |
+| 행위                                                   | 처리 위치                                                                |
+| ------------------------------------------------------ | ------------------------------------------------------------------------ |
+| 의도된 제외 (비대상 리그·TBD 팀) → skipped             | `naver.ts:toMatch` (kind='skipped' — 상시 발생, 로그 없음)               |
+| 데이터 이상 (schema 불일치·bestOf 계약 위반) → anomaly | `naver.ts:toMatch` (kind='anomaly' — 행만 격리, main이 경고 로그)        |
+| 시간 정규화 → UTC ISO                                  | `naver.ts:epochMsToIsoUtc` (epoch ms → ISO)                              |
+| `bestOf` 1·3·5 검증 type guard                         | `match.ts:isBestOf` (Bo0·Bo2·Bo7 등 위반 → anomaly 격리, throw 아님)     |
+| status 정규화 (3값으로 축소)                           | `matchStatus` → `toMatchStatus` (`scheduled` · `completed` · `canceled`) |
+| 한국어 팀 displayName                                  | LCK 팀은 도메인 표준(`LCK_TEAM_DISPLAY_NAME`), 그 외 네이버 값 그대로    |
+| UID 멱등성 + namespace                                 | `naver:${gameId}` 접두 (소스 전환 시 충돌 회피용 namespace)              |
 
 ### 3.2 ③ generateIcs — RFC 5545 직조 (시작 시각 정렬 내장)
 

@@ -60,11 +60,16 @@ type MatchProps = {
   readonly replayVideoId?: number;
 };
 
-/** Bo1/3/5 외 값은 BestOf 계약 위반 → throw. context는 발생 위치 추적용. */
-export function assertBestOf(value: number, context: string): asserts value is BestOf {
-  if (value !== 1 && value !== 3 && value !== 5) {
-    throw new Error(`bestOf 계약 위반: ${value} (${context})`);
-  }
+/**
+ * Bo1/3/5 검증 type guard — 계약 위반 값(0·2·7 등)의 처리 방식은 호출자가 결정.
+ *
+ * 이전엔 assertBestOf(throw)였으나, 네이버가 단일 매치에 maxMatchCount=0을
+ * 내려준 사건(2026-07, issue #38)으로 행 하나의 이상이 전체 발행을 6일간
+ * 중단시킴 → 행 단위 이상은 격리(quarantine)로 강등. fail-loud는 인프라
+ * 실패(API 다운·envelope 위반·매치 0개) 전용으로 유지.
+ */
+export function isBestOf(value: number): value is BestOf {
+  return value === 1 || value === 3 || value === 5;
 }
 
 export class Match {

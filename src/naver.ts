@@ -7,7 +7,7 @@
  */
 
 import { z } from 'zod';
-import { Match, assertBestOf, type MatchScore, type MatchStatus } from './match.js';
+import { Match, isBestOf, type MatchScore, type MatchStatus } from './match.js';
 import { type League } from './league.js';
 import { toTeam } from './team.js';
 
@@ -89,18 +89,57 @@ const NaverResponseSchema = z.object({
 
 /* ─────────── Translation — unknown → Match ─────────── */
 
-export function toMatch(raw: unknown): Match | null {
+/**
+ * 행 단위 파싱 결과 3분류 — "의도된 제외"와 "데이터 이상"을 구분.
+ *
+ * - parsed:  정상 변환된 매치
+ * - skipped: 의도된 제외 (비대상 리그·TBD 팀) — 상시 발생, 로그 불필요
+ * - anomaly: 네이버 데이터 계약 위반 (schema 불일치·bestOf 이상) —
+ *            해당 행만 격리하고 상위에서 경고 로그. 전체 발행은 계속.
+ *            (throw로 전역 실패시키지 않음 — issue #38: 매치 1개의
+ *            maxMatchCount=0이 10팀 ICS 발행을 6일간 중단시킨 사건)
+ */
+export type MatchAnomaly = {
+  readonly gameId: string;
+  readonly reason: string;
+};
+
+export type MatchParseResult =
+  | { readonly kind: 'parsed'; readonly match: Match }
+  | { readonly kind: 'skipped' }
+  | { readonly kind: 'anomaly'; readonly anomaly: MatchAnomaly };
+
+/** zod parse 실패 행에서도 gameId는 최대한 건져 경고 로그의 추적성 확보. */
+function extractGameId(raw: unknown): string {
+  if (typeof raw === 'object' && raw !== null && 'gameId' in raw) {
+    const id: unknown = raw.gameId;
+    if (typeof id === 'string') return id;
+  }
+  return '(unknown)';
+}
+
+export function toMatch(raw: unknown): MatchParseResult {
   const parsed = NaverMatchSchema.safeParse(raw);
-  if (!parsed.success) return null;
+  if (!parsed.success) {
+    return {
+      kind: 'anomaly',
+      anomaly: { gameId: extractGameId(raw), reason: 'schema 불일치 (zod parse 실패)' },
+    };
+  }
 
   const m = parsed.data;
   const league = toLeague(m.topLeagueId);
-  if (!league) return null;
-  if (!m.homeTeam || !m.awayTeam) return null;
+  if (!league) return { kind: 'skipped' };
+  if (!m.homeTeam || !m.awayTeam) return { kind: 'skipped' };
 
-  assertBestOf(m.maxMatchCount, `naver gameId=${m.gameId}`);
+  if (!isBestOf(m.maxMatchCount)) {
+    return {
+      kind: 'anomaly',
+      anomaly: { gameId: m.gameId, reason: `bestOf 계약 위반: ${m.maxMatchCount}` },
+    };
+  }
 
-  return Match.create({
+  const match = Match.create({
     id: `naver:${m.gameId}`,
     league,
     stage: m.title,
@@ -115,6 +154,7 @@ export function toMatch(raw: unknown): Match | null {
     chzzkChannelId: m.chzzkChannelId ?? undefined,
     replayVideoId: m.replayVideoId ?? undefined,
   });
+  return { kind: 'parsed', match };
 }
 
 /** 완료 매치에만 점수 가짐 — 셋 다 있고 winner가 실제 팀일 때만 MatchScore 반환. */
@@ -128,8 +168,19 @@ function toScore(m: {
   return { home: m.homeScore, away: m.awayScore, winner: m.winner };
 }
 
-export function toMatches(raws: readonly unknown[]): Match[] {
-  return raws.map(toMatch).filter((m): m is Match => m !== null);
+export type ParseOutcome = {
+  readonly matches: Match[];
+  readonly anomalies: MatchAnomaly[];
+};
+
+export function toMatches(raws: readonly unknown[]): ParseOutcome {
+  const matches: Match[] = [];
+  const anomalies: MatchAnomaly[] = [];
+  for (const result of raws.map(toMatch)) {
+    if (result.kind === 'parsed') matches.push(result.match);
+    else if (result.kind === 'anomaly') anomalies.push(result.anomaly);
+  }
+  return { matches, anomalies };
 }
 
 function epochMsToIsoUtc(epochMs: number): string {
@@ -164,16 +215,19 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-export async function fetchAllMatches(now: Date = new Date()): Promise<Match[]> {
-  const all: Match[] = [];
+export async function fetchAllMatches(now: Date = new Date()): Promise<ParseOutcome> {
+  const allMatches: Match[] = [];
+  const allAnomalies: MatchAnomaly[] = [];
   let isFirstCall = true;
   for (const { topLeagueId, yearMonth } of scheduleTasks(now)) {
     if (!isFirstCall) await sleep(FETCH_INTERVAL_MS);
     isFirstCall = false;
     const raws = await fetchMonth(topLeagueId, yearMonth);
-    all.push(...toMatches(raws));
+    const { matches, anomalies } = toMatches(raws);
+    allMatches.push(...matches);
+    allAnomalies.push(...anomalies);
   }
-  return all;
+  return { matches: allMatches, anomalies: allAnomalies };
 }
 
 function scheduleTasks(now: Date): Array<{ topLeagueId: NaverTopLeagueId; yearMonth: string }> {

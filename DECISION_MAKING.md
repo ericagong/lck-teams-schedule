@@ -549,6 +549,23 @@ Naver adapter  ──→  Match  ←──  ICS generator
 
 **한계**: 12h lag 동안 진짜 신규 매치(긴급 변경 등)는 사용자 캘린더에 안 보임. 매치 시작 직전 발표 같은 극단 케이스에서 문제.
 
+### 6.1.1 fail-loud의 범위 축소 — 행 단위 이상은 격리(quarantine) (2026-07-28, issue #38)
+
+**문제**: 네이버가 단일 매치(gameId=`202607271500bHNlYhlol`)에 `maxMatchCount: 0`을 내려줌 → `assertBestOf` throw → **매치 1개의 데이터 이상이 10팀 ICS 발행 전체를 6일간 중단** (issue #30~#38). 해당 매치는 종료 후에도 0으로 남았고, 5개월 rolling window 특성상 2026-07월 데이터는 10월 말까지 계속 fetch되므로 자연 치유 불가.
+
+**대안**: A. 행 격리 + 경고 로그 / B. bestOf=0을 Bo3 기본값으로 포함 / C. fail-loud 유지 (수동 대응).
+
+**선택**: A — 파싱 결과를 `parsed | skipped | anomaly` 3분류로 나누고, anomaly(schema 불일치·bestOf 계약 위반)는 해당 행만 발행에서 제외 + `WARN` 로그(gameId·이유). 워크플로는 성공 처리.
+
+**근거**:
+
+1. **fail-loud의 원래 목적은 인프라 실패** (API 다운·envelope 위반·매치 0개) — 행 하나의 이상까지 전역 실패로 승격하면 멀쩡한 매치 수백 개가 인질이 됨. 인프라 레벨 throw(§6.1)는 그대로 유지.
+2. **신뢰 경계 일관성** — 기존에도 zod parse 실패·TBD 팀은 행 단위 drop이었음. bestOf만 전역 throw인 건 비일관. 오히려 zod 실패도 anomaly로 승격해 관측성을 높임 (winner='NONE' silent 누락 사건의 교훈).
+3. **대량 이상 방어는 기존 sanity check가 담당** — 0 matches / 0 future matches 가드가 여전히 워크플로를 실패시킴.
+4. **B(기본값 Bo3) 기각** — 잘못된 형식 정보(🎮 Bo3)를 사용자에게 노출 + 도메인 타입이 데이터를 속임.
+
+**한계**: 격리된 매치는 네이버가 데이터를 고칠 때까지 캘린더에서 빠짐 ("한 경기도 놓치지 않게" 슬로건과 부분 상충). 관측은 Actions 로그(`WARN: ⚠️ 매치 격리`)로만 — 별도 알림 없음.
+
 ### 6.2 호출 사이 500ms 버퍼 — burst-429 회피
 
 **문제**: 6 대회 × 5 month = 30 호출을 ~8초에 burst → 로컬 IP가 429 trigger 가능.

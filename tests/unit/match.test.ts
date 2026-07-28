@@ -14,7 +14,13 @@ function loadFixture(name: string): NaverEnvelope {
 
 function parseFixture(name: string): Match[] {
   const response = loadFixture(name);
-  return toMatches(response.content?.matches ?? []);
+  return toMatches(response.content?.matches ?? []).matches;
+}
+
+/** parsed 결과에서 Match 추출 — 아니면 null (테스트 가독성용). */
+function parsedMatch(raw: unknown): Match | null {
+  const result = toMatch(raw);
+  return result.kind === 'parsed' ? result.match : null;
 }
 
 /**
@@ -93,69 +99,69 @@ describe('toMatch — LCK sample fixture', () => {
 
 describe('toMatch — status enum 매핑', () => {
   it('BEFORE → scheduled', () => {
-    expect(toMatch(makeRaw({ matchStatus: 'BEFORE' }))?.status).toBe('scheduled');
+    expect(parsedMatch(makeRaw({ matchStatus: 'BEFORE' }))?.status).toBe('scheduled');
   });
 
   it('RESULT → completed', () => {
-    expect(toMatch(makeRaw({ matchStatus: 'RESULT' }))?.status).toBe('completed');
+    expect(parsedMatch(makeRaw({ matchStatus: 'RESULT' }))?.status).toBe('completed');
   });
 
   it('CANCEL → canceled', () => {
-    expect(toMatch(makeRaw({ matchStatus: 'CANCEL' }))?.status).toBe('canceled');
+    expect(parsedMatch(makeRaw({ matchStatus: 'CANCEL' }))?.status).toBe('canceled');
   });
 
   it('알려지지 않은 상태(DELAYED 등) → scheduled (안전 기본값)', () => {
-    expect(toMatch(makeRaw({ matchStatus: 'DELAYED' }))?.status).toBe('scheduled');
+    expect(parsedMatch(makeRaw({ matchStatus: 'DELAYED' }))?.status).toBe('scheduled');
   });
 });
 
-describe('toMatch — maxMatchCount (1/3/5 통과, 그 외 throw)', () => {
+describe('toMatch — maxMatchCount (1/3/5 통과, 그 외 anomaly 격리)', () => {
   it('Bo1 → 통과', () => {
-    expect(toMatch(makeRaw({ maxMatchCount: 1 }))).not.toBeNull();
+    expect(toMatch(makeRaw({ maxMatchCount: 1 })).kind).toBe('parsed');
   });
   it('Bo3 → 통과', () => {
-    expect(toMatch(makeRaw({ maxMatchCount: 3 }))).not.toBeNull();
+    expect(toMatch(makeRaw({ maxMatchCount: 3 })).kind).toBe('parsed');
   });
   it('Bo5 → 통과', () => {
-    expect(toMatch(makeRaw({ maxMatchCount: 5 }))).not.toBeNull();
+    expect(toMatch(makeRaw({ maxMatchCount: 5 })).kind).toBe('parsed');
   });
-  it('Bo2 → throw (BestOf 계약 위반)', () => {
-    expect(() => toMatch(makeRaw({ maxMatchCount: 2 }))).toThrow(/bestOf 계약 위반/);
+  it('Bo2 → anomaly (BestOf 계약 위반 — throw 대신 행 격리)', () => {
+    expect(toMatch(makeRaw({ maxMatchCount: 2 })).kind).toBe('anomaly');
   });
-  it('Bo7 → throw (BestOf 계약 위반)', () => {
-    expect(() => toMatch(makeRaw({ maxMatchCount: 7 }))).toThrow(/bestOf 계약 위반/);
+  it('Bo7 → anomaly (BestOf 계약 위반 — throw 대신 행 격리)', () => {
+    expect(toMatch(makeRaw({ maxMatchCount: 7 })).kind).toBe('anomaly');
   });
 });
 
-describe('toMatch — TBD/팀 누락 안전 처리 (silent skip)', () => {
-  it('homeTeam null → null', () => {
-    expect(toMatch(makeRaw({ homeTeam: null }))).toBeNull();
+describe('toMatch — TBD/팀 누락 안전 처리', () => {
+  it('homeTeam null → skipped (의도된 제외)', () => {
+    expect(toMatch(makeRaw({ homeTeam: null })).kind).toBe('skipped');
   });
-  it('awayTeam null → null', () => {
-    expect(toMatch(makeRaw({ awayTeam: null }))).toBeNull();
+  it('awayTeam null → skipped (의도된 제외)', () => {
+    expect(toMatch(makeRaw({ awayTeam: null })).kind).toBe('skipped');
   });
-  it('nameEngAcronym 비어있으면 null', () => {
-    expect(toMatch(makeRaw({ homeTeam: { name: 'T1', nameEngAcronym: '' } }))).toBeNull();
+  it('nameEngAcronym 비어있으면 anomaly (schema 위반)', () => {
+    expect(toMatch(makeRaw({ homeTeam: { name: 'T1', nameEngAcronym: '' } })).kind).toBe('anomaly');
   });
-  it('name(한국어) 비어있으면 null', () => {
-    expect(toMatch(makeRaw({ homeTeam: { name: '', nameEngAcronym: 'T1' } }))).toBeNull();
+  it('name(한국어) 비어있으면 anomaly (schema 위반)', () => {
+    expect(toMatch(makeRaw({ homeTeam: { name: '', nameEngAcronym: 'T1' } })).kind).toBe('anomaly');
   });
 });
 
 describe('toMatch — alien topLeagueId (도메인 미등록)', () => {
-  it('NAVER_TO_LEAGUE에 없는 topLeagueId → null (silent skip)', () => {
-    expect(toMatch(makeRaw({ topLeagueId: 'unknown_xyz' }))).toBeNull();
+  it('NAVER_TO_LEAGUE에 없는 topLeagueId → skipped (의도된 제외)', () => {
+    expect(toMatch(makeRaw({ topLeagueId: 'unknown_xyz' })).kind).toBe('skipped');
   });
 
-  it('빈 문자열 topLeagueId → null', () => {
-    expect(toMatch(makeRaw({ topLeagueId: '' }))).toBeNull();
+  it('빈 문자열 topLeagueId → skipped', () => {
+    expect(toMatch(makeRaw({ topLeagueId: '' })).kind).toBe('skipped');
   });
 });
 
 describe('toMatches — envelope unwrap 빈 응답 안전 처리', () => {
   it('content가 null인 경우(상위 호출자 통과 패턴) → 빈 배열', () => {
     const response: NaverEnvelope = { content: null };
-    expect(toMatches(response.content?.matches ?? [])).toEqual([]);
+    expect(toMatches(response.content?.matches ?? [])).toEqual({ matches: [], anomalies: [] });
   });
 
   it('invalid topLeagueId (matches=[]) → 빈 배열', () => {
@@ -190,7 +196,7 @@ describe('toMatches — 6 대회 fixture smoke (DTO 안정성 + 도메인 League
 
 describe('toMatch — LCK 팀 displayName 도메인 표준 (Naver 표기 변화 흔들림 X)', () => {
   it('Naver name이 "Gen.G Esports"여도 LCK 표준 "젠지"로 override', () => {
-    const m = toMatch(
+    const m = parsedMatch(
       makeRaw({
         homeTeam: { name: 'Gen.G Esports', nameEngAcronym: 'GEN' },
       }),
@@ -200,7 +206,7 @@ describe('toMatch — LCK 팀 displayName 도메인 표준 (Naver 표기 변화 
   });
 
   it('KRX (2026 키움증권 후원 — Naver 응답 name 무시, 도메인 표준 적용)', () => {
-    const m = toMatch(
+    const m = parsedMatch(
       makeRaw({
         homeTeam: { name: '아무거나', nameEngAcronym: 'KRX' },
       }),
@@ -210,7 +216,7 @@ describe('toMatch — LCK 팀 displayName 도메인 표준 (Naver 표기 변화 
   });
 
   it('Naver acronym이 소문자/공백 섞여 있어도 정규화 후 LCK 표준 적용', () => {
-    const m = toMatch(
+    const m = parsedMatch(
       makeRaw({
         homeTeam: { name: 'whatever', nameEngAcronym: '  t1  ' },
       }),
@@ -220,7 +226,7 @@ describe('toMatch — LCK 팀 displayName 도메인 표준 (Naver 표기 변화 
   });
 
   it('International 팀(LCK 외)은 Naver 값 그대로 (열린 집합)', () => {
-    const m = toMatch(
+    const m = parsedMatch(
       makeRaw({
         topLeagueId: 'msi',
         homeTeam: { name: 'G2 Esports', nameEngAcronym: 'G2' },
