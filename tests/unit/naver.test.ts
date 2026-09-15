@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { getScheduleMonths, toMatch, toMatches } from '../../src/naver.js';
+import { getScheduleMonths, isFutureScheduleLost, toMatch, toMatches } from '../../src/naver.js';
 import { ALL_LEAGUES, LEAGUE_DISPLAY_NAME } from '../../src/league.js';
 import type { Match } from '../../src/match.js';
 
@@ -135,6 +135,60 @@ describe('toMatch — 행 단위 격리 (issue #38: bestOf=0 매치 1개가 전�
     expect(matches).toHaveLength(2);
     expect(anomalies).toHaveLength(1);
     expect(anomalies[0]?.gameId).toBe('bad-1');
+  });
+});
+
+describe('isFutureScheduleLost — 휴식기와 schema drift 구분 (2026-09-13 LCK 결승 직후 오탐 회귀 방지)', () => {
+  const NOW = new Date(Date.UTC(2026, 8, 14, 19, 0, 0)); // 2026-09-15 04:00 KST cron
+  const PAST = Date.UTC(2026, 8, 13, 5, 0, 0); // 결승
+  const FUTURE = Date.UTC(2026, 9, 15, 16, 0, 0); // Worlds Play-In
+
+  it('휴식기 — 과거 매치만 있고 격리도 없음 → 정상 (발행 계속)', () => {
+    const outcome = toMatches([rawMatch({ gameId: 'final', startDate: PAST })]);
+    expect(isFutureScheduleLost(outcome, NOW)).toBe(false);
+  });
+
+  it('휴식기 — 다음 대회가 전부 TBD(skipped) → 정상', () => {
+    const outcome = toMatches([
+      rawMatch({ startDate: PAST }),
+      rawMatch({ topLeagueId: 'world_championship', startDate: FUTURE, homeTeam: null }),
+    ]);
+    expect(isFutureScheduleLost(outcome, NOW)).toBe(false);
+  });
+
+  it('휴식기 + 과거 격리 행(issue #38 bestOf=0 잔존) → 정상 (과거 격리는 판정 무관)', () => {
+    const outcome = toMatches([
+      rawMatch({ startDate: PAST }),
+      rawMatch({ gameId: '202607271500bHNlYhlol', maxMatchCount: 0, startDate: PAST }),
+    ]);
+    expect(isFutureScheduleLost(outcome, NOW)).toBe(false);
+  });
+
+  it('schema drift — 미래 행이 전부 격리됨 → 소실 (워크플로 실패)', () => {
+    const outcome = toMatches([
+      rawMatch({ startDate: PAST, matchStatus: 'RESULT', winner: 'HOME' }),
+      rawMatch({ gameId: 'drift-1', startDate: FUTURE, winner: 'SOMETHING_NEW' }),
+      rawMatch({ gameId: 'drift-2', startDate: FUTURE, winner: 'SOMETHING_NEW' }),
+    ]);
+    expect(outcome.anomalies[0]?.startsAt?.getTime()).toBe(FUTURE); // zod 실패 행에서도 시각 추출
+    expect(isFutureScheduleLost(outcome, NOW)).toBe(true);
+  });
+
+  it('미래 정상 매치가 1건이라도 있으면 → 정상 (부분 격리는 WARN으로 충분)', () => {
+    const outcome = toMatches([
+      rawMatch({ gameId: 'ok', startDate: FUTURE }),
+      rawMatch({ gameId: 'bad', startDate: FUTURE, maxMatchCount: 0 }),
+    ]);
+    expect(isFutureScheduleLost(outcome, NOW)).toBe(false);
+  });
+
+  it('startDate 추출 불가 격리 행은 판정 제외 (그 drift는 0 matches 가드 담당)', () => {
+    const outcome = toMatches([
+      rawMatch({ startDate: PAST }),
+      { gameId: 'broken', startDate: 'x' },
+    ]);
+    expect(outcome.anomalies[0]?.startsAt).toBeNull();
+    expect(isFutureScheduleLost(outcome, NOW)).toBe(false);
   });
 });
 

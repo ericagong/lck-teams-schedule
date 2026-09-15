@@ -9,7 +9,7 @@ import { resolve } from 'node:path';
 import { generateIcs, uidOf, type VeventMeta } from './ics.js';
 import { buildIndexHtml } from './landing.js';
 import type { Match } from './match.js';
-import { fetchAllMatches } from './naver.js';
+import { fetchAllMatches, isFutureScheduleLost } from './naver.js';
 import {
   computeContentHash,
   decideSyncMeta,
@@ -95,7 +95,7 @@ async function main(): Promise<void> {
   log.info(`Got ${matches.length} matches.`);
 
   // 행 단위 데이터 이상은 격리 + 경고 — 전체 발행은 계속 (fail-loud는 인프라 실패 전용).
-  // 대량 이상(전 매치 parse fail 등)은 아래 sanity check(0 matches / 0 future)가 잡음.
+  // 대량 이상은 아래 sanity check(0 matches / 예정 매치 전량 격리)가 잡음.
   for (const a of anomalies) {
     log.warn(`⚠️ 매치 격리: gameId=${a.gameId} — ${a.reason}`);
   }
@@ -112,15 +112,16 @@ async function main(): Promise<void> {
     );
   }
 
-  // 미래 매치 0건이면 schema drift 의심 — RESULT만 통과하고 BEFORE는 모두 누락된 case
-  // (실제 발생 이력: winner='NONE' 신규 값을 enum에 미반영해 예정 매치 silent 누락).
-  // 휴식기에도 다음 split·국제대회 일정은 보통 미리 등록되어 0이면 비정상.
+  // 미래 매치 0건 자체는 휴식기에 정상 (예: LCK 결승 직후 ~ 국제대회 대진 확정 전, 전부 TBD라 skipped).
+  // 비정상은 "미래 행이 왔는데 전부 격리됨" — schema drift (winner='NONE' 미반영 사건 재발) 케이스만 실패.
   const now = new Date();
-  const futureCount = matches.filter((m) => m.startDate > now).length;
-  if (futureCount === 0) {
+  if (isFutureScheduleLost({ matches, anomalies }, now)) {
     throw new Error(
-      'Suspicious: 0 future matches — schema drift 의심 (예정 매치가 모두 parse fail 가능성)',
+      'Suspicious: 예정 매치가 전부 격리됨 — schema drift 의심 (위 WARN 격리 로그 확인)',
     );
+  }
+  if (!matches.some((m) => m.startDate > now)) {
+    log.info('예정 매치 0건 — 휴식기로 판단, 지난 경기 결과만 발행');
   }
 
   await mkdir(PUBLIC_DIR, { recursive: true });

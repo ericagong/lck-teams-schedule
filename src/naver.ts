@@ -102,6 +102,8 @@ const NaverResponseSchema = z.object({
 export type MatchAnomaly = {
   readonly gameId: string;
   readonly reason: string;
+  /** 경기 시각 (best-effort) — 미래 매치 격리 여부 판정용. 추출 불가 시 null. */
+  readonly startsAt: Date | null;
 };
 
 export type MatchParseResult =
@@ -118,12 +120,25 @@ function extractGameId(raw: unknown): string {
   return '(unknown)';
 }
 
+/** zod parse 실패 행에서도 startDate(epoch ms)는 최대한 건져 미래 격리 판정에 사용. */
+function extractStartsAt(raw: unknown): Date | null {
+  if (typeof raw === 'object' && raw !== null && 'startDate' in raw) {
+    const ms: unknown = raw.startDate;
+    if (typeof ms === 'number' && Number.isFinite(ms)) return new Date(ms);
+  }
+  return null;
+}
+
 export function toMatch(raw: unknown): MatchParseResult {
   const parsed = NaverMatchSchema.safeParse(raw);
   if (!parsed.success) {
     return {
       kind: 'anomaly',
-      anomaly: { gameId: extractGameId(raw), reason: 'schema 불일치 (zod parse 실패)' },
+      anomaly: {
+        gameId: extractGameId(raw),
+        reason: 'schema 불일치 (zod parse 실패)',
+        startsAt: extractStartsAt(raw),
+      },
     };
   }
 
@@ -135,7 +150,11 @@ export function toMatch(raw: unknown): MatchParseResult {
   if (!isBestOf(m.maxMatchCount)) {
     return {
       kind: 'anomaly',
-      anomaly: { gameId: m.gameId, reason: `bestOf 계약 위반: ${m.maxMatchCount}` },
+      anomaly: {
+        gameId: m.gameId,
+        reason: `bestOf 계약 위반: ${m.maxMatchCount}`,
+        startsAt: new Date(m.startDate),
+      },
     };
   }
 
@@ -181,6 +200,22 @@ export function toMatches(raws: readonly unknown[]): ParseOutcome {
     else if (result.kind === 'anomaly') anomalies.push(result.anomaly);
   }
   return { matches, anomalies };
+}
+
+/**
+ * 예정 매치 소실 판정 — "미래 매치 0건"의 두 얼굴을 구분.
+ *
+ * - 휴식기 (정상): 네이버가 미래 행을 아예 안 주거나 TBD라 skipped → false
+ *   (실제 발생: 2026-09-13 LCK 결승 직후 ~ Worlds 대진 확정 전)
+ * - schema drift (비정상): 미래 행은 왔는데 전부 anomaly로 격리됨 → true
+ *   (실제 발생 이력: winner='NONE' 미반영으로 예정 매치 전량 parse fail)
+ *
+ * startsAt=null 격리 행은 판정에서 제외 — startDate 자체가 깨지는 drift라면
+ * 과거 행까지 전부 실패하므로 main의 "0 matches" 가드가 잡음.
+ */
+export function isFutureScheduleLost({ matches, anomalies }: ParseOutcome, now: Date): boolean {
+  if (matches.some((m) => m.startDate > now)) return false;
+  return anomalies.some((a) => a.startsAt !== null && a.startsAt > now);
 }
 
 function epochMsToIsoUtc(epochMs: number): string {
